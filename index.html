@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fyzio Totaal — MT Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --green-dark:   #1a4a3a;
+      --green-mid:    #2d6b55;
+      --green-light:  #3d8b6e;
+      --green-pale:   #e8f4f0;
+      --green-border: #c5e0d8;
+      --accent:       #f0a500;
+      --accent-light: #fff3cc;
+      --text-primary: #1a2e28;
+      --text-secondary: #4a6b5e;
+      --text-muted:   #7a9e94;
+      --white:        #ffffff;
+      --bg:           #f4f8f6;
+      --card-shadow:  0 2px 12px rgba(26,74,58,0.08);
+      --card-hover:   0 6px 24px rgba(26,74,58,0.15);
+    }
+
+    body {
+      font-family: 'Outfit', sans-serif;
+      background: var(--bg);
+      color: var(--text-primary);
+      min-height: 100vh;
+    }
+
+    /* ── HEADER ── */
+    header {
+      background: linear-gradient(135deg, var(--green-dark) 0%, var(--green-mid) 100%);
+      color: var(--white);
+      padding: 2rem 1.5rem 2.5rem;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+    header::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse at 70% 50%, rgba(255,255,255,0.06) 0%, transparent 60%);
+      pointer-events: none;
+    }
+    .header-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: .45rem;
+      background: rgba(255,255,255,0.12);
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 2rem;
+      padding: .3rem .9rem;
+      font-size: .75rem;
+      font-weight: 500;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      margin-bottom: 1rem;
+      color: rgba(255,255,255,0.85);
+    }
+    .header-logo { font-size: 2.2rem; margin-bottom: .4rem; }
+    header h1 { font-size: 1.7rem; font-weight: 700; letter-spacing: -.01em; }
+    header p  { font-size: .95rem; color: rgba(255,255,255,0.7); margin-top: .35rem; }
+    .mt-pill {
+      display: inline-block;
+      background: var(--accent);
+      color: #5a3a00;
+      font-size: .7rem;
+      font-weight: 700;
+      letter-spacing: .07em;
+      text-transform: uppercase;
+      padding: .2rem .65rem;
+      border-radius: 2rem;
+      margin-top: .75rem;
+    }
+
+    /* ── MAIN ── */
+    main {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 2rem 1.25rem 4rem;
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: .75rem;
+      margin-bottom: 1.25rem;
+    }
+    .section-header h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+    .section-line {
+      flex: 1;
+      height: 1px;
+      background: var(--green-border);
+    }
+
+    /* ── CARDS GRID ── */
+    .cards-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2.5rem;
+    }
+
+    .card {
+      background: var(--white);
+      border: 1px solid var(--green-border);
+      border-radius: 14px;
+      padding: 1.4rem 1.4rem 1.2rem;
+      display: flex;
+      flex-direction: column;
+      gap: .6rem;
+      box-shadow: var(--card-shadow);
+      text-decoration: none;
+      color: inherit;
+      transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+      cursor: pointer;
+    }
+    .card:hover {
+      transform: translateY(-3px);
+      box-shadow: var(--card-hover);
+      border-color: var(--green-light);
+    }
+    .card-icon { font-size: 1.8rem; line-height: 1; }
+    .card-title {
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      line-height: 1.25;
+    }
+    .card-desc {
+      font-size: .85rem;
+      color: var(--text-secondary);
+      line-height: 1.5;
+      flex: 1;
+    }
+    .card-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .35rem;
+      margin-top: .1rem;
+    }
+    .tag {
+      display: inline-block;
+      font-size: .68rem;
+      font-weight: 600;
+      letter-spacing: .03em;
+      padding: .18rem .55rem;
+      border-radius: 2rem;
+      background: var(--green-pale);
+      color: var(--green-mid);
+      border: 1px solid var(--green-border);
+    }
+    .tag.orange {
+      background: var(--accent-light);
+      color: #8a5800;
+      border-color: #f5d98a;
+    }
+    .card-link {
+      font-size: .82rem;
+      font-weight: 600;
+      color: var(--green-mid);
+      margin-top: .25rem;
+      display: flex;
+      align-items: center;
+      gap: .3rem;
+    }
+    .card-link::after { content: '→'; }
+
+    /* ── COMING SOON CARD ── */
+    .card.soon {
+      border-style: dashed;
+      background: transparent;
+      box-shadow: none;
+      opacity: .6;
+      cursor: default;
+    }
+    .card.soon:hover { transform: none; box-shadow: none; }
+    .card.soon .card-title { color: var(--text-muted); }
+
+    /* ── BOOKMARK BAR ── */
+    .bookmark-bar {
+      background: var(--white);
+      border: 1px solid var(--green-border);
+      border-radius: 12px;
+      padding: 1rem 1.25rem;
+      display: flex;
+      align-items: center;
+      gap: .75rem;
+      font-size: .85rem;
+      color: var(--text-secondary);
+      box-shadow: var(--card-shadow);
+    }
+    .bookmark-bar .bm-icon { font-size: 1.1rem; }
+    .bookmark-bar strong { color: var(--text-primary); }
+    .bookmark-bar code {
+      font-family: monospace;
+      font-size: .8rem;
+      background: var(--green-pale);
+      border: 1px solid var(--green-border);
+      border-radius: 6px;
+      padding: .15rem .45rem;
+      color: var(--green-dark);
+    }
+
+    /* ── FOOTER ── */
+    footer {
+      text-align: center;
+      padding: 1.5rem;
+      font-size: .78rem;
+      color: var(--text-muted);
+      border-top: 1px solid var(--green-border);
+    }
+
+    @media (max-width: 480px) {
+      header h1 { font-size: 1.4rem; }
+      .cards-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="header-badge">🔒 Alleen voor intern gebruik</div>
+  <div class="header-logo">🏥</div>
+  <h1>Fyzio Totaal</h1>
+  <p>MT Dashboard — Wierden</p>
+  <div class="mt-pill">Management Team</div>
+</header>
+
+<main>
+
+  <div class="section-header">
+    <h2>MT Tools</h2>
+    <div class="section-line"></div>
+  </div>
+
+  <div class="cards-grid" id="mt-tools">
+
+    <!-- PLACEHOLDER 1 -->
+    <a class="card" href="#" onclick="return false;">
+      <div class="card-icon">📊</div>
+      <div class="card-title">Tool 1</div>
+      <div class="card-desc">Beschrijving volgt zodra de tool is aangeleverd.</div>
+      <div class="card-tags">
+        <span class="tag">MT</span>
+        <span class="tag orange">Placeholder</span>
+      </div>
+      <div class="card-link">Openen</div>
+    </a>
+
+    <!-- PLACEHOLDER 2 -->
+    <a class="card" href="#" onclick="return false;">
+      <div class="card-icon">📈</div>
+      <div class="card-title">Tool 2</div>
+      <div class="card-desc">Beschrijving volgt zodra de tool is aangeleverd.</div>
+      <div class="card-tags">
+        <span class="tag">MT</span>
+        <span class="tag orange">Placeholder</span>
+      </div>
+      <div class="card-link">Openen</div>
+    </a>
+
+    <!-- PLACEHOLDER 3 -->
+    <a class="card" href="#" onclick="return false;">
+      <div class="card-icon">💼</div>
+      <div class="card-title">Tool 3</div>
+      <div class="card-desc">Beschrijving volgt zodra de tool is aangeleverd.</div>
+      <div class="card-tags">
+        <span class="tag">MT</span>
+        <span class="tag orange">Placeholder</span>
+      </div>
+      <div class="card-link">Openen</div>
+    </a>
+
+  </div>
+
+  <div class="section-header">
+    <h2>Binnenkort</h2>
+    <div class="section-line"></div>
+  </div>
+
+  <div class="cards-grid">
+    <div class="card soon">
+      <div class="card-icon">➕</div>
+      <div class="card-title">Meer tools</div>
+      <div class="card-desc">Hier komen meer MT-tools zodra ze beschikbaar zijn.</div>
+    </div>
+  </div>
+
+  <div class="bookmark-bar">
+    <span class="bm-icon">💡</span>
+    <span>Sla deze pagina op als bladwijzer: <code>lonnekevv.github.io/mt-dashboard</code></span>
+  </div>
+
+</main>
+
+<footer>
+  <strong>Fyzio Totaal</strong> · Nijverheidsstraat 7, Wierden · Intern gebruik — MT
+</footer>
+
+</body>
+</html>
