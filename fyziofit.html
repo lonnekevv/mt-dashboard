@@ -9,16 +9,17 @@
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Outfit', sans-serif; background: #f5f5f3; min-height: 100vh; }
-    #root { max-width: 980px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+    #root { max-width: 980px; margin: 0 auto; padding: 1rem 0.75rem 5rem; }
     input[type=number]::-webkit-inner-spin-button,
     input[type=number]::-webkit-outer-spin-button { opacity: 1; }
     input[type=date], select {
-      padding: 5px 8px; border: 1px solid #e0e0da; border-radius: 6px;
-      font-family: 'Outfit', sans-serif; font-size: 13px; background: #fff; color: #1a1a1a;
+      padding: 7px 10px; border: 1px solid #e0e0da; border-radius: 6px;
+      font-family: 'Outfit', sans-serif; font-size: 14px; background: #fff; color: #1a1a1a;
+      min-height: 40px;
     }
-    .sync-bar { display:flex; align-items:center; gap:8px; padding:8px 14px; border-radius:8px; margin-bottom:1rem; font-size:12px; font-weight:500; border:1px solid; }
+    .sync-bar { display:flex; align-items:center; gap:8px; padding:8px 14px; border-radius:8px; margin-bottom:0.875rem; font-size:12px; font-weight:500; border:1px solid; }
     .sync-bar.ok    { background:#e6f4ec; color:#1a7a4a; border-color:#b2dfc4; }
     .sync-bar.error { background:#fdecea; color:#c0392b; border-color:#f5b7b1; }
     .sync-bar.loading { background:#fef3dc; color:#b45309; border-color:#f5d98a; }
@@ -29,10 +30,116 @@
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
     @keyframes spin { to { transform:rotate(360deg); } }
     .spin { animation:spin 1s linear infinite; display:inline-block; }
+
+    /* ── MOBIELE BOTTOM TAB BAR ── */
+    .mobile-tab-bar {
+      display: none; position: fixed; bottom:0; left:0; right:0;
+      background: #1a4a3a; z-index: 200;
+      box-shadow: 0 -2px 14px rgba(0,0,0,0.2);
+    }
+    .mobile-tab-bar .tab-items { display:flex; justify-content:space-around; }
+    .mobile-tab-bar button {
+      flex:1; background:transparent; border:none; color:rgba(255,255,255,0.55);
+      padding: 9px 4px 13px; font-family:'Outfit',sans-serif; font-size:10px;
+      font-weight:500; cursor:pointer; display:flex; flex-direction:column;
+      align-items:center; gap:3px; min-height:56px; transition:color .15s;
+    }
+    .mobile-tab-bar button.active { color:#fff; }
+    .mobile-tab-bar button .ticon { font-size:20px; line-height:1; }
+    @media (max-width:680px) {
+      .desktop-tabs { display:none !important; }
+      .mobile-tab-bar { display:block; }
+      #root { padding-bottom: 4.5rem; }
+    }
+
+    /* ── TABELLEN: horizontaal scrollen ── */
+    .tbl-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius:10px; border:0.5px solid #e0e0da; }
+    @media (max-width:680px) {
+      .tbl-wrap table { min-width: 520px; }
+    }
+
+    /* ── METRIC KAARTEN ── */
+    @media (max-width:540px) {
+      .metric-3 { grid-template-columns: 1fr 1fr !important; }
+      .metric-3 > :last-child:nth-child(odd) { grid-column: span 2; }
+    }
+
+    /* ── COLLEGA GRID ── */
+    @media (max-width:480px) {
+      .collega-grid { grid-template-columns: 1fr 1fr !important; }
+    }
+
+    /* ── WEEK SELECTOR ROW ── */
+    .sel-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; background:#f5f5f3; border-radius:8px; padding:10px 14px; border:0.5px solid #e0e0da; margin-bottom:1.25rem; }
+    @media (max-width:480px) {
+      .sel-row select, .sel-row input[type=date] { width:100%; }
+    }
+
+    /* ── INVOER KAARTEN op mobiel (vervangt tabel) ── */
+    .groep-cards { display:none; flex-direction:column; gap:10px; margin-bottom:1rem; }
+    @media (max-width:640px) {
+      .invoer-tabel-wrap { display:none !important; }
+      .groep-cards { display:flex; }
+    }
+    .gc { background:#fff; border:0.5px solid #e0e0da; border-radius:10px; padding:13px 14px; }
+    .gc-head { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px; }
+    .gc-name { font-size:13px; font-weight:600; color:#1a1a1a; }
+    .gc-time { font-size:11px; color:#6b6b65; margin-top:1px; }
+    .gc-inputs { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px; }
+    .gc-lbl { font-size:10px; color:#6b6b65; text-transform:uppercase; letter-spacing:.04em; margin-bottom:3px; }
+    .gc-inp { width:100%; padding:9px 10px; font-size:15px; border:1px solid #e0e0da; border-radius:6px; font-family:'Outfit',sans-serif; text-align:center; background:#fff; }
+    .gc-slots { display:flex; align-items:center; gap:6px; margin-bottom:10px; }
+    .gc-slots label { font-size:12px; color:#6b6b65; }
+    .gc-slots input { width:56px; padding:7px; font-size:14px; border:1px solid #e0e0da; border-radius:6px; text-align:center; font-family:'Outfit',sans-serif; }
+    .gc-foot { display:flex; justify-content:space-between; align-items:center; }
+    .gc-skip { background:transparent; border:0.5px solid #e0e0da; border-radius:6px; padding:6px 12px; font-size:12px; cursor:pointer; font-family:'Outfit',sans-serif; min-height:36px; }
+
+    /* ── MT TWEE-KOLOM ── */
+    @media (max-width:640px) {
+      .mt-two-col { grid-template-columns:1fr !important; }
+    }
+    /* ── MT TREND GRID ── */
+    @media (max-width:540px) {
+      .trend-3 { grid-template-columns:1fr !important; gap:20px !important; }
+    }
+    /* ── ACTIE BLOK ── */
+    @media (max-width:560px) {
+      .actie-inner { flex-direction:column !important; }
+      .actie-chart { min-width:unset !important; width:100% !important; }
+    }
+    /* ── SIGNAAL RIJEN ── */
+    @media (max-width:480px) {
+      .sig-detail { display:none; }
+    }
+    /* ── ALGEMEEN: grotere touch targets ── */
+    button { min-height: 38px; }
   </style>
 </head>
 <body>
 <div id="root"></div>
+<nav class="mobile-tab-bar" id="mobile-nav">
+  <div class="tab-items">
+    <button id="mtb-invoer" class="active" onclick="mobileTab('invoer')">
+      <span class="ticon">✏️</span><span>Invoer</span>
+    </button>
+    <button id="mtb-week" onclick="mobileTab('week')">
+      <span class="ticon">📅</span><span>Week</span>
+    </button>
+    <button id="mtb-maand" onclick="mobileTab('maand')">
+      <span class="ticon">📆</span><span>Maand</span>
+    </button>
+    <button id="mtb-mt" onclick="mobileTab('mt')">
+      <span class="ticon">📊</span><span>MT</span>
+    </button>
+  </div>
+</nav>
+<script>
+function mobileTab(id) {
+  document.querySelectorAll('.mobile-tab-bar button').forEach(b => b.classList.remove('active'));
+  document.getElementById('mtb-'+id).classList.add('active');
+  if (window.__setTab) window.__setTab(id);
+}
+</script>
 <script type="text/babel">
 const { useState, useEffect, useCallback, useMemo, memo } = React;
 
@@ -180,7 +287,7 @@ function InvoerTab({formData,setFormData}) {
   return (
     <div>
       <SyncBar status={syncStatus} msg={syncMsg}/>
-      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:"1.25rem",flexWrap:"wrap",background:BRAND.gray,borderRadius:8,padding:"10px 14px",border:"0.5px solid "+BRAND.border}}>
+      <div className="sel-row">
         <label style={{fontSize:13,color:BRAND.textMuted,fontWeight:500}}>Week van maandag</label>
         <input type="date" value={currentMonday} onChange={e=>{setCurrentMonday(e.target.value);setSaved(false);}}/>
         <span style={{fontSize:12,color:BRAND.textMuted}}>{formatWeekLabel(currentMonday)}</span>
@@ -189,7 +296,7 @@ function InvoerTab({formData,setFormData}) {
       <div style={{marginBottom:"0.75rem",display:"flex",gap:16,flexWrap:"wrap"}}>
         {FINANCE.map(fc=><span key={fc} style={{display:"flex",alignItems:"center",gap:5,fontSize:12,color:BRAND.textMuted}}><span style={{width:8,height:8,borderRadius:2,background:BRAND.green}}/>{fc} – {FINANCE_LABELS[fc]}</span>)}
       </div>
-      <div style={{overflowX:"auto",borderRadius:10,border:"0.5px solid "+BRAND.border,marginBottom:"1rem"}}>
+      <div className="invoer-tabel-wrap tbl-wrap" style={{marginBottom:"1rem"}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
           <thead><tr style={{background:BRAND.green}}>
             {["Dag","Tijd","Collega","Zittingen",...FINANCE,"Status",""].map((h,i)=>(
@@ -199,6 +306,47 @@ function InvoerTab({formData,setFormData}) {
           <tbody>{DEFAULT_GROUPS.map(g=><InvoerRow key={g.id} g={g} row={formData[g.id]||emptyRow(g.slots)} onVal={onVal} onSlots={onSlots} onSkip={onSkip}/>)}</tbody>
         </table>
       </div>
+
+      {/* Mobiele kaartweergave */}
+      <div className="groep-cards">
+        {DEFAULT_GROUPS.map(g=>{
+          const row=formData[g.id]||emptyRow(g.slots);
+          const skipped=isSkip(row);
+          const slots=getSlots(row,g);
+          const rend=isRend(row,g);
+          return (
+            <div key={g.id} className="gc" style={{opacity:skipped?0.6:1,borderLeft:"3px solid "+(skipped?"#ccc":rend?BRAND.success:BRAND.danger)}}>
+              <div className="gc-head">
+                <div><div className="gc-name">{g.collega}</div><div className="gc-time">{g.day} · {g.time}</div></div>
+                <Badge ok={rend} skipped={skipped}/>
+              </div>
+              {!skipped&&<>
+                <div className="gc-slots">
+                  <label>Zittingen:</label>
+                  <input type="number" min="1" max="6" value={slots} className="gc-inp" style={{width:56}}
+                    onChange={e=>onSlots(g.id,e.target.value)}/>
+                </div>
+                <div className="gc-inputs">
+                  {FINANCE.map(fc=>(
+                    <div key={fc}>
+                      <div className="gc-lbl">{FINANCE_LABELS[fc]}</div>
+                      <input type="number" min="0" value={row[fc]} className="gc-inp"
+                        onChange={e=>onVal(g.id,fc,e.target.value)}/>
+                    </div>
+                  ))}
+                </div>
+              </>}
+              <div className="gc-foot">
+                <button className="gc-skip" onClick={()=>onSkip(g.id)}
+                  style={{color:skipped?BRAND.success:BRAND.textMuted}}>
+                  {skipped?"Herstel":"Vervallen"}
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
       <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:"1.5rem"}}>
         <button onClick={handleSave} disabled={saving} style={{background:BRAND.orange,color:"#fff",border:"none",borderRadius:8,padding:"9px 24px",fontSize:13,fontWeight:500,cursor:saving?"not-allowed":"pointer",opacity:saving?0.7:1,fontFamily:"'Outfit',sans-serif"}}>
           {saving?"Opslaan…":"Opslaan"}
@@ -207,7 +355,7 @@ function InvoerTab({formData,setFormData}) {
         {saveErr&&<span style={{fontSize:13,color:BRAND.danger}}>⚠ {saveErr}</span>}
       </div>
       <div style={{fontSize:13,fontWeight:500,color:BRAND.textMuted,marginBottom:10}}>Overzicht per collega</div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10}}>
+      <div className="collega-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10}}>
         {collegaStats.map(({c,decl,tot,rend,total,allSkipped})=>{
           const allGood=total>0&&rend===total,noneGood=total===0||rend===0;
           return <div key={c} style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderRadius:10,padding:"12px 14px",borderLeft:"3px solid "+(allSkipped?"#ccc":allGood?BRAND.greenMid:noneGood?BRAND.danger:BRAND.warn),opacity:allSkipped?0.5:1}}>
@@ -249,7 +397,7 @@ function WeekTab() {
 
   return (
     <div>
-      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:"1.25rem",flexWrap:"wrap",background:BRAND.gray,borderRadius:8,padding:"10px 14px",border:"0.5px solid "+BRAND.border}}>
+      <div className="sel-row">
         <label style={{fontSize:13,color:BRAND.textMuted,fontWeight:500}}>Kies week</label>
         <select value={historyWeek} onChange={e=>setHistoryWeek(e.target.value)}>
           {!sortedKeys.length&&<option>Nog geen weken opgeslagen</option>}
@@ -269,7 +417,7 @@ function WeekTab() {
             </div>
           ))}
         </div>
-        <div style={{overflowX:"auto",borderRadius:10,border:"0.5px solid "+BRAND.border}}>
+        <div className="tbl-wrap">
           <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
             <thead><tr style={{background:BRAND.green}}>
               {["Dag","Tijd","Collega","Zittingen","Patiënten","Declarabel","Status"].map((h,i)=>(
@@ -347,14 +495,14 @@ function MaandTab() {
       <div style={{minWidth:130,fontSize:13,fontWeight:500,color:BRAND.text}}>{s.g.day} {s.g.time}<div style={{fontSize:11,color:BRAND.textMuted,fontWeight:400}}>{s.g.collega}</div></div>
       <div style={{flex:1,height:8,background:"#e8e8e4",borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:Math.min(s.pct,100)+"%",background:color,borderRadius:4}}/></div>
       <div style={{minWidth:44,textAlign:"right",fontWeight:700,fontSize:15,color}}>{s.pct}%</div>
-      <div style={{minWidth:120,fontSize:12,color:BRAND.textMuted,textAlign:"right"}}>{s.decl}/{s.slots} decl. · {s.rendWks}/{s.actWks} wkn</div>
+      <div className="sig-detail" style={{minWidth:120,fontSize:12,color:BRAND.textMuted,textAlign:"right"}}>{s.decl}/{s.slots} decl. · {s.rendWks}/{s.actWks} wkn</div>
     </div>;
   }
 
   return (
     <div>
       <MonthSelect/>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:"1.5rem"}}>
+      <div className="metric-3" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:"1.5rem"}}>
         {[{label:"Opengestelde zittingen",value:totalSlots,sub:ag.length+" groepen",color:BRAND.greenMid},
           {label:"Totaal patiënten",value:totalPats,sub:bezetting+"% bezetting",color:bezetting>=100?BRAND.success:bezetting>=75?BRAND.warn:BRAND.danger},
           {label:"Totaal declarabel",value:totalDecl,sub:bezettingDecl+"% van zittingen",color:bezettingDecl>=100?BRAND.success:bezettingDecl>=75?BRAND.warn:BRAND.danger},
@@ -498,7 +646,7 @@ function MTTab() {
         </div>
       </div>
 
-      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:"1.5rem"}}>
+      <div className="metric-3" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:"1.5rem"}}>
         {[{label:"Opengestelde zittingen",value:totalSlots,sub:ag.length+" groepen · "+mtData.weekCount+" wkn",color:BRAND.greenMid},
           {label:"Totaal patiënten",value:totalPats,sub:bezetting+"% bezetting",color:bezetting>=100?BRAND.success:bezetting>=75?BRAND.warn:BRAND.danger},
           {label:"Totaal declarabel",value:totalDecl,sub:bezettingDecl+"% van zittingen",color:bezettingDecl>=100?BRAND.success:bezettingDecl>=75?BRAND.warn:BRAND.danger},
@@ -511,7 +659,7 @@ function MTTab() {
         ))}
       </div>
 
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:"1.5rem"}}>
+      <div className="mt-two-col" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:"1.5rem"}}>
         <div style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderRadius:12,padding:"16px 18px"}}>
           <div style={{fontSize:13,fontWeight:600,color:BRAND.text,marginBottom:14}}>Declarabiliteit per collega</div>
           {collegaStats.map(({c,slots,decl,pct})=>{ const color=pct>=100?BRAND.success:pct>=75?BRAND.warn:BRAND.danger; return (
@@ -539,7 +687,7 @@ function MTTab() {
 
       <div style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderRadius:12,padding:"16px 18px",marginBottom:"1.5rem"}}>
         <div style={{fontSize:13,fontWeight:600,color:BRAND.text,marginBottom:14}}>Trend — over tijd</div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16}}>
+        <div className="trend-3" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16}}>
           {[{key:"slots",label:"Zittingen",color:BRAND.greenMid},{key:"pats",label:"Patiënten",color:BRAND.orange},{key:"decl",label:"Declarabel",color:BRAND.success}].map(({key,label,color})=>(
             <div key={key}>
               <div style={{fontSize:11,color:BRAND.textMuted,fontWeight:500,marginBottom:6,textTransform:"uppercase",letterSpacing:"0.4px"}}>{label}</div>
@@ -561,7 +709,7 @@ function MTTab() {
           const patroonColor=structureel?BRAND.danger:incidenteel?BRAND.success:BRAND.warn;
           return (
             <div key={g.id} style={{padding:"12px 14px",borderRadius:10,background:urgent?BRAND.dangerBg:BRAND.warnBg,border:"0.5px solid "+(urgent?BRAND.danger:BRAND.warn),marginBottom:12}}>
-              <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+              <div className="actie-inner" style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
                 <div style={{flex:1,minWidth:180}}>
                   <div style={{fontSize:13,fontWeight:600,color:BRAND.text}}>{g.day} {g.time} · {g.collega}</div>
                   <div style={{fontSize:12,color:BRAND.textMuted,margin:"2px 0 6px"}}>{pct}% declarabel — {tekort} zitting{tekort!==1?"en":""} onder grens</div>
@@ -574,7 +722,7 @@ function MTTab() {
                     <tbody>{history.map((hm)=>{ const pc=hm.pct>=100?BRAND.success:hm.pct>=75?BRAND.warn:BRAND.danger; return <tr key={hm.mk} style={{borderBottom:"0.5px solid "+BRAND.border,background:hm.isCurrent?BRAND.gray:"#fff",fontWeight:hm.isCurrent?600:400}}><td style={{padding:"5px 7px"}}>{hm.label}{hm.isCurrent?" ◀":""}</td><td style={{padding:"5px 7px",textAlign:"center"}}>{hm.slots}</td><td style={{padding:"5px 7px",textAlign:"center"}}>{hm.decl}</td><td style={{padding:"5px 7px",textAlign:"center",color:pc,fontWeight:600}}>{hm.pct}%</td></tr>; })}</tbody>
                   </table>
                 </div>
-                <div style={{minWidth:230,flex:"0 0 auto"}}>
+                <div className="actie-chart" style={{minWidth:230,flex:"0 0 auto"}}>
                   <div style={{fontSize:10,color:BRAND.textMuted,marginBottom:4,fontWeight:500,textTransform:"uppercase",letterSpacing:"0.4px"}}>Declarabiliteit per maand</div>
                   <MiniTrendBar history={history}/>
                 </div>
@@ -590,6 +738,7 @@ function MTTab() {
 // ── ROOT APP ──────────────────────────────────────────────────────────────
 function App() {
   const [tab,setTab] = useState("invoer");
+  useEffect(()=>{ window.__setTab = (id) => { setTab(id); }; return ()=>{ delete window.__setTab; }; },[]);
   const [formData,setFormData] = useState(emptyForm);
   const [weeks,setWeeks] = useState({});
   const [syncStatus,setSyncStatus] = useState("loading");
@@ -624,7 +773,7 @@ function App() {
               ☁ Gedeelde opslag
             </div>
           </div>
-          <div style={{display:"flex",gap:2}}>
+          <div className="desktop-tabs" style={{display:"flex",gap:2}}>
             {tabs.map(t=>(
               <button key={t.id} onClick={()=>setTab(t.id)} style={{background:tab===t.id?"#fff":"transparent",border:"none",borderRadius:"8px 8px 0 0",padding:"8px 16px",fontSize:13,fontWeight:tab===t.id?500:400,color:tab===t.id?BRAND.green:"rgba(255,255,255,0.75)",cursor:"pointer",fontFamily:"'Outfit',sans-serif"}}>
                 {t.label}
