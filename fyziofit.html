@@ -182,7 +182,7 @@ function App() {
   const [historyWeek,setHistoryWeek]=useState("");
   const [monthKey,setMonthKey]=useState(()=>new Date().toISOString().slice(0,7));
 
-  useEffect(()=>{ setSyncStatus("loading"); sbLoadWeeks().then(d=>{ setWeeks(d); setLoaded(true); setSyncStatus("ok"); const ks=Object.keys(d); if(ks.length)setHistoryWeek(ks.sort().reverse()[0]); }).catch(e=>{ setLoaded(true); setSyncStatus("error"); setSyncMsg(e.message); }); },[]);
+  useEffect(()=>{ setSyncStatus("loading"); sbLoadWeeks().then(d=>{ setWeeks(d); setLoaded(true); setSyncStatus("ok"); const ks=Object.keys(d).sort().reverse(); if(ks.length){ setHistoryWeek(ks[0]); setMonthKey(ks[0].slice(0,7)); } }).catch(e=>{ setLoaded(true); setSyncStatus("error"); setSyncMsg(e.message); }); },[]);
 
   useEffect(()=>{ if(!loaded)return; if(weeks[currentMonday]){ const s=weeks[currentMonday],m={}; DEFAULT_GROUPS.forEach(g=>{ m[g.id]=s[g.id]?s[g.id]:emptyFormRow(g.slots); if(m[g.id]._slots==null)m[g.id]._slots=g.slots; }); setFormData(m); }else{ setFormData(emptyForm(DEFAULT_GROUPS)); } setSavedOk(false); },[currentMonday,loaded]);
 
