@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FyzioFit Uren — Fyzio Totaal</title>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css" />
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Outfit', sans-serif; background: #f5f5f3; min-height: 100vh; }
+    #root { max-width: 960px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+    input[type=number]::-webkit-inner-spin-button,
+    input[type=number]::-webkit-outer-spin-button { opacity: 1; }
+    input[type=date] { padding: 5px 8px; border: 1px solid #e0e0da; border-radius: 6px; font-family: 'Outfit', sans-serif; font-size: 13px; background: #fff; color: #1a1a1a; }
+    select { padding: 5px 8px; border: 1px solid #e0e0da; border-radius: 6px; font-family: 'Outfit', sans-serif; font-size: 13px; background: #fff; color: #1a1a1a; }
+    .sync-bar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 8px; margin-bottom: 1rem; font-size: 12px; font-weight: 500; border: 1px solid; }
+    .sync-bar.ok    { background: #e6f4ec; color: #1a7a4a; border-color: #b2dfc4; }
+    .sync-bar.error { background: #fdecea; color: #c0392b; border-color: #f5b7b1; }
+    .sync-bar.loading { background: #fef3dc; color: #b45309; border-color: #f5d98a; }
+    .sync-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .sync-dot.ok    { background: #1a7a4a; }
+    .sync-dot.error { background: #c0392b; }
+    .sync-dot.loading { background: #b45309; animation: pulse 1s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spin { animation: spin 1s linear infinite; display: inline-block; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+const SB_URL = "https://szunargvsmtzbbnmnghc.supabase.co/rest/v1";
+const SB_KEY = "sb_publishable_EiIt1zJuqgjj-2FJ4mXTlg__kmUrPu5";
+const SB_HDR = { "apikey": SB_KEY, "Authorization": "Bearer " + SB_KEY, "Content-Type": "application/json", "Prefer": "resolution=merge-duplicates" };
+
+async function sbLoadWeeks() {
+  const r = await fetch(SB_URL + "/fyziofit_weeks?select=*&order=id.asc", { headers: SB_HDR });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  const rows = await r.json();
+  const out = {};
+  rows.forEach(row => { out[row.id] = row.data; });
+  return out;
+}
+async function sbSaveWeek(mondayStr, data) {
+  const r = await fetch(SB_URL + "/fyziofit_weeks", { method: "POST", headers: SB_HDR, body: JSON.stringify({ id: mondayStr, data: data, updated_at: new Date().toISOString() }) });
+  if (!r.ok) { const t = await r.text(); throw new Error("HTTP " + r.status + ": " + t); }
+}
+
+const BRAND = { green:"#1a4a3a", greenMid:"#2a6b52", greenLight:"#e8f2ee", orange:"#e8611a", orangeLight:"#fdf0e8", gray:"#f5f5f3", border:"#e0e0da", text:"#1a1a1a", textMuted:"#6b6b65", success:"#1a7a4a", successBg:"#e6f4ec", danger:"#c0392b", dangerBg:"#fdecea", warn:"#b45309", warnBg:"#fef3e2" };
+const DEFAULT_GROUPS = [
+  { id:"ma13", day:"Maandag",   time:"13:00", collega:"Jan Willem", slots:2 },
+  { id:"ma16", day:"Maandag",   time:"16:10", collega:"Lars",       slots:3 },
+  { id:"di13", day:"Dinsdag",   time:"13:00", collega:"Laura",      slots:2 },
+  { id:"di16", day:"Dinsdag",   time:"16:10", collega:"Lonneke",    slots:3 },
+  { id:"wo13", day:"Woensdag",  time:"13:00", collega:"Thomas",     slots:2 },
+  { id:"wo16", day:"Woensdag",  time:"16:10", collega:"Julia",      slots:3 },
+  { id:"do13", day:"Donderdag", time:"13:00", collega:"Jesper",     slots:2 },
+  { id:"do16", day:"Donderdag", time:"16:10", collega:"Laura",      slots:3 },
+  { id:"vr13", day:"Vrijdag",   time:"13:00", collega:"Lynn",       slots:2 },
+  { id:"vr16", day:"Vrijdag",   time:"16:10", collega:"Jesper",     slots:2 },
+];
+const FINANCE = ["10007","10008","10009","998"];
+const FINANCE_LABELS = {"10007":"Declarabel","10008":"Zorgplan","10009":"Abonnement","998":"Zonder decl."};
+const GROUP_DAY_INDEX = { ma13:0,ma16:0,di13:1,di16:1,wo13:2,wo16:2,do13:3,do16:3,vr13:4,vr16:4 };
+
+function getMondayStr(d) { const day=d.getDay(),diff=d.getDate()-day+(day===0?-6:1); const m=new Date(d); m.setDate(diff); return m.toISOString().slice(0,10); }
+function formatWeekLabel(s) { const mon=new Date(s+"T00:00:00"),fri=new Date(mon); fri.setDate(mon.getDate()+4); return mon.getDate()+" – "+fri.toLocaleDateString("nl-NL",{day:"numeric",month:"long",year:"numeric"}); }
+function getMonthKey(s) { return s.slice(0,7); }
+function emptyFormRow(slots) { const row={_skip:false,_slots:slots}; FINANCE.forEach(fc=>{row[fc]="";}); return row; }
+function emptyForm(groups) { const f={}; groups.forEach(g=>{f[g.id]=emptyFormRow(g.slots);}); return f; }
+function getDecl(data,gid) { return parseInt(data[gid]&&data[gid]["10007"]?data[gid]["10007"]:"0",10); }
+function isSkipped(data,gid) { return data[gid]&&data[gid]._skip===true; }
+function effectiveSlots(data,g) { return (data[g.id]&&data[g.id]._slots!=null)?data[g.id]._slots:g.slots; }
+function isRendabel(g,data) { return !isSkipped(data,g.id)&&getDecl(data,g.id)>=effectiveSlots(data,g); }
+function totalDecl(data,groups) { return groups.filter(g=>!isSkipped(data,g.id)).reduce((s,g)=>s+getDecl(data,g.id),0); }
+function totalAll(data,groups) { return groups.filter(g=>!isSkipped(data,g.id)).reduce((s,g)=>FINANCE.reduce((ss,fc)=>ss+parseInt((data[g.id]&&data[g.id][fc])?data[g.id][fc]:"0",10),s),0); }
+
+function SyncBar({status,msg}) {
+  const labels={ok:"Gesynchroniseerd met gedeelde database",error:"Synchronisatiefout",loading:"Verbinden met database…"};
+  return <div className={"sync-bar "+status}><div className={"sync-dot "+status}/><span>{labels[status]}{msg?" — "+msg:""}</span></div>;
+}
+function Pill({color,bg,children}) { return <span style={{display:"inline-block",padding:"2px 10px",borderRadius:20,fontSize:12,fontWeight:500,background:bg,color:color}}>{children}</span>; }
+function Badge({ok,skipped}) {
+  if(skipped) return <span style={{display:"inline-flex",alignItems:"center",gap:4,padding:"2px 8px",borderRadius:20,fontSize:11,fontWeight:500,background:"#f0f0ee",color:BRAND.textMuted}}><i className="ti ti-ban" style={{fontSize:11}}/>Vervallen</span>;
+  return <span style={{display:"inline-flex",alignItems:"center",gap:4,padding:"2px 8px",borderRadius:20,fontSize:11,fontWeight:500,background:ok?BRAND.successBg:BRAND.dangerBg,color:ok?BRAND.success:BRAND.danger}}><span style={{width:6,height:6,borderRadius:"50%",background:ok?BRAND.success:BRAND.danger}}/>{ok?"Rendabel":"Niet rendabel"}</span>;
+}
+function MetricCard({label,value,sub,accent}) {
+  return <div style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderRadius:12,padding:"14px 18px",borderTop:"3px solid "+(accent?BRAND.orange:BRAND.greenMid)}}><div style={{fontSize:12,color:BRAND.textMuted,marginBottom:4,textTransform:"uppercase",letterSpacing:"0.5px"}}>{label}</div><div style={{fontSize:26,fontWeight:600,color:BRAND.text,lineHeight:1}}>{value}</div>{sub&&<div style={{fontSize:12,color:BRAND.textMuted,marginTop:4}}>{sub}</div>}</div>;
+}
+
+function CollegaCards({data,groups}) {
+  const collegas=[...new Set(groups.map(g=>g.collega))];
+  return <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10,marginTop:4}}>{collegas.map(c=>{
+    const cg=groups.filter(g=>g.collega===c),activeCg=cg.filter(g=>!isSkipped(data,g.id));
+    const decl=activeCg.reduce((s,g)=>s+getDecl(data,g.id),0),tot=activeCg.reduce((s,g)=>FINANCE.reduce((ss,fc)=>ss+parseInt((data[g.id]&&data[g.id][fc])?data[g.id][fc]:"0",10),s),0);
+    const rend=activeCg.filter(g=>isRendabel(g,data)).length,total=activeCg.length;
+    const allGood=total>0&&rend===total,noneGood=total===0||rend===0,allSkipped=cg.every(g=>isSkipped(data,g.id));
+    return <div key={c} style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderRadius:10,padding:"12px 14px",borderLeft:"3px solid "+(allSkipped?"#ccc":allGood?BRAND.greenMid:noneGood?BRAND.danger:BRAND.warn),opacity:allSkipped?0.5:1}}>
+      <div style={{fontSize:13,fontWeight:500,color:BRAND.text,marginBottom:6}}>{c}</div>
+      {allSkipped?<div style={{fontSize:11,color:BRAND.textMuted}}>Alle groepen vervallen</div>:<>
+        <div style={{fontSize:22,fontWeight:600,color:BRAND.green}}>{decl}</div>
+        <div style={{fontSize:11,color:BRAND.textMuted,marginBottom:6}}>declarabel / {tot} totaal</div>
+        <div style={{fontSize:11,fontWeight:500,color:allGood?BRAND.success:noneGood?BRAND.danger:BRAND.warn}}>{rend}/{total} groepen rendabel</div>
+      </>}
+    </div>;
+  })}</div>;
+}
+
+function GroupTable({data,groups,editable,onToggleSkip,onSlotsChange,onValChange}) {
+  return <div style={{overflowX:"auto",borderRadius:10,border:"0.5px solid "+BRAND.border}}>
+    <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}><thead><tr style={{background:BRAND.green}}>
+      {["Dag","Tijd","Collega","Zittingen"].concat(FINANCE).concat(["Status",editable?"":"Totaal"]).map((h,i)=>(
+        <th key={i} style={{textAlign:i>3?"center":"left",padding:"9px 10px",fontWeight:500,fontSize:12,color:"rgba(255,255,255,0.85)",whiteSpace:"nowrap"}}>{h}</th>
+      ))}
+    </tr></thead><tbody>{groups.map((g,i)=>{
+      const skipped=isSkipped(data,g.id),rend=isRendabel(g,data),slots=effectiveSlots(data,g);
+      const tot=FINANCE.reduce((s,fc)=>s+parseInt((data[g.id]&&data[g.id][fc])?data[g.id][fc]:"0",10),0);
+      return <tr key={g.id} style={{borderBottom:"0.5px solid "+BRAND.border,background:skipped?"#f7f7f5":i%2===0?"#fff":BRAND.gray,opacity:skipped?0.6:1}}>
+        <td style={{padding:"8px 10px",fontWeight:500,color:BRAND.text}}>{g.day}</td>
+        <td style={{padding:"8px 10px",color:BRAND.textMuted}}>{g.time}</td>
+        <td style={{padding:"8px 10px",color:BRAND.text}}>{g.collega}</td>
+        <td style={{textAlign:"center",padding:"6px 8px"}}>{editable&&!skipped?
+          <input type="number" min="1" max="6" value={slots} onChange={e=>onSlotsChange(g.id,e.target.value)} style={{width:44,textAlign:"center",fontSize:13,padding:"4px 2px",border:"1px solid "+BRAND.border,borderRadius:6,background:"#fff",color:BRAND.text,outline:"none"}}/>:
+          <span style={{color:BRAND.textMuted}}>{skipped?"—":slots}</span>}
+        </td>
+        {FINANCE.map(fc=><td key={fc} style={{textAlign:"center",padding:"6px 6px"}}>{editable?(skipped?<span style={{fontSize:12,color:BRAND.textMuted}}>—</span>:
+          <input type="number" min="0" value={data[g.id][fc]} onChange={e=>onValChange(g.id,fc,e.target.value)} style={{width:48,textAlign:"center",fontSize:13,padding:"5px 2px",border:"1px solid "+BRAND.border,borderRadius:6,background:"#fff",color:BRAND.text,outline:"none"}}/>):(
+          <span style={{display:"inline-block",minWidth:24,padding:"1px 7px",borderRadius:12,background:parseInt((data[g.id]&&data[g.id][fc])?data[g.id][fc]:"0",10)>0?BRAND.greenLight:"transparent",color:parseInt((data[g.id]&&data[g.id][fc])?data[g.id][fc]:"0",10)>0?BRAND.green:BRAND.textMuted,fontWeight:parseInt((data[g.id]&&data[g.id][fc])?data[g.id][fc]:"0",10)>0?600:400}}>{parseInt((data[g.id]&&data[g.id][fc])?data[g.id][fc]:"0",10)}</span>
+        )}</td>)}
+        <td style={{textAlign:"center",padding:"8px 10px"}}><Badge ok={rend} skipped={skipped}/></td>
+        {editable?<td style={{textAlign:"center",padding:"6px 8px"}}>
+          <button onClick={()=>onToggleSkip(g.id)} style={{background:"transparent",border:"0.5px solid "+BRAND.border,borderRadius:6,padding:"4px 8px",cursor:"pointer",color:skipped?BRAND.green:BRAND.textMuted,fontSize:12,display:"inline-flex",alignItems:"center",gap:4,fontFamily:"'Outfit',sans-serif"}}>
+            <i className={"ti "+(skipped?"ti-rotate-clockwise":"ti-ban")} style={{fontSize:13}}/>{skipped?"Herstel":"Vervallen"}
+          </button>
+        </td>:<td style={{textAlign:"center",padding:"8px 10px",fontWeight:600,color:BRAND.text}}>{skipped?"—":tot}</td>}
+      </tr>;
+    })}</tbody></table>
+  </div>;
+}
+
+function MonthGroupTable({data,groups}) {
+  return <div style={{overflowX:"auto",borderRadius:10,border:"0.5px solid "+BRAND.border}}>
+    <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}><thead><tr style={{background:BRAND.green}}>
+      {["Dag","Tijd","Collega","Actieve weken","Rendabele weken"].concat(FINANCE).concat(["Totaal patiënten"]).map((h,i)=>(
+        <th key={i} style={{textAlign:i>2?"center":"left",padding:"9px 10px",fontWeight:500,fontSize:12,color:"rgba(255,255,255,0.85)",whiteSpace:"nowrap"}}>{h}</th>
+      ))}
+    </tr></thead><tbody>{groups.map((g,i)=>{
+      const d=data[g.id],aw=d._activeWeeks||0,rw=d._rendWeeks||0;
+      const tot=FINANCE.reduce((s,fc)=>s+parseInt(d[fc]||"0",10),0);
+      const allR=aw>0&&rw===aw,noneR=rw===0;
+      return <tr key={g.id} style={{borderBottom:"0.5px solid "+BRAND.border,background:i%2===0?"#fff":BRAND.gray}}>
+        <td style={{padding:"9px 10px",fontWeight:500,color:BRAND.text}}>{g.day}</td>
+        <td style={{padding:"9px 10px",color:BRAND.textMuted}}>{g.time}</td>
+        <td style={{padding:"9px 10px",color:BRAND.text}}>{g.collega}</td>
+        <td style={{textAlign:"center",padding:"9px 10px"}}>{aw}</td>
+        <td style={{textAlign:"center",padding:"9px 10px"}}><span style={{fontWeight:500,color:allR?BRAND.success:(noneR&&aw>0)?BRAND.danger:BRAND.warn}}>{rw}/{aw}</span></td>
+        {FINANCE.map(fc=><td key={fc} style={{textAlign:"center",padding:"9px 8px"}}>
+          <span style={{display:"inline-block",minWidth:24,padding:"1px 7px",borderRadius:12,background:parseInt(d[fc]||"0",10)>0?BRAND.greenLight:"transparent",color:parseInt(d[fc]||"0",10)>0?BRAND.green:BRAND.textMuted,fontWeight:parseInt(d[fc]||"0",10)>0?600:400}}>{parseInt(d[fc]||"0",10)}</span>
+        </td>)}
+        <td style={{textAlign:"center",padding:"9px 10px",fontWeight:600,color:BRAND.text}}>{tot}</td>
+      </tr>;
+    })}</tbody></table>
+  </div>;
+}
+
+function App() {
+  const [tab,setTab]=useState("invoer");
+  const [weeks,setWeeks]=useState({});
+  const [loaded,setLoaded]=useState(false);
+  const [syncStatus,setSyncStatus]=useState("loading");
+  const [syncMsg,setSyncMsg]=useState("");
+  const [currentMonday,setCurrentMonday]=useState(getMondayStr(new Date()));
+  const [formData,setFormData]=useState(()=>emptyForm(DEFAULT_GROUPS));
+  const [savedOk,setSavedOk]=useState(false);
+  const [saving,setSaving]=useState(false);
+  const [historyWeek,setHistoryWeek]=useState("");
+  const [monthKey,setMonthKey]=useState(()=>new Date().toISOString().slice(0,7));
+
+  useEffect(()=>{ setSyncStatus("loading"); sbLoadWeeks().then(d=>{ setWeeks(d); setLoaded(true); setSyncStatus("ok"); const ks=Object.keys(d); if(ks.length)setHistoryWeek(ks.sort().reverse()[0]); }).catch(e=>{ setLoaded(true); setSyncStatus("error"); setSyncMsg(e.message); }); },[]);
+
+  useEffect(()=>{ if(!loaded)return; if(weeks[currentMonday]){ const s=weeks[currentMonday],m={}; DEFAULT_GROUPS.forEach(g=>{ m[g.id]=s[g.id]?s[g.id]:emptyFormRow(g.slots); if(m[g.id]._slots==null)m[g.id]._slots=g.slots; }); setFormData(m); }else{ setFormData(emptyForm(DEFAULT_GROUPS)); } setSavedOk(false); },[currentMonday,loaded]);
+
+  function setVal(gid,fc,v){ const n=v===""?"":String(Math.max(0,parseInt(v)||0)); setFormData(p=>{const nx={...p};nx[gid]={...p[gid]};nx[gid][fc]=n;return nx;}); setSavedOk(false); }
+  function toggleSkip(gid){ setFormData(p=>{const nx={...p},row={...p[gid]};row._skip=!row._skip;if(row._skip)FINANCE.forEach(fc=>{row[fc]="";}); nx[gid]=row;return nx;}); setSavedOk(false); }
+  function setSlots(gid,v){ const n=Math.max(1,Math.min(6,parseInt(v)||1)); setFormData(p=>{const nx={...p};nx[gid]={...p[gid]};nx[gid]._slots=n;return nx;}); setSavedOk(false); }
+
+  async function handleSave(){ setSaving(true);setSyncStatus("loading"); try{ await sbSaveWeek(currentMonday,formData); setWeeks(p=>({...p,[currentMonday]:formData})); setSavedOk(true);setSyncStatus("ok");setSyncMsg(""); if(!historyWeek||historyWeek<currentMonday)setHistoryWeek(currentMonday); }catch(e){ setSyncStatus("error");setSyncMsg(e.message); }finally{ setSaving(false); } }
+
+  const sortedWeekKeys=Object.keys(weeks).sort().reverse();
+
+  function getMonthData(mk){ const [y,m]=mk.split("-").map(Number),ms=new Date(y,m-1,1),me=new Date(y,m,0); const rel=sortedWeekKeys.filter(k=>{ const mon=new Date(k+"T00:00:00"),fri=new Date(mon);fri.setDate(mon.getDate()+4);return fri>=ms&&mon<=me; }); if(!rel.length)return null; const tot={}; DEFAULT_GROUPS.forEach(g=>{ const ft={};FINANCE.forEach(fc=>{ft[fc]=0;}); let aw=0,rw=0,ss=0; rel.forEach(wk=>{ const wd=weeks[wk]; if(!wd||!wd[g.id]||isSkipped(wd,g.id))return; const mon=new Date(wk+"T00:00:00"),gd=new Date(mon);gd.setDate(mon.getDate()+(GROUP_DAY_INDEX[g.id]||0)); if(gd<ms||gd>me)return; aw++;const slots=(wd[g.id]._slots!=null)?wd[g.id]._slots:g.slots;ss+=slots;FINANCE.forEach(fc=>{ft[fc]+=parseInt(wd[g.id][fc]||"0",10);}); if(parseInt(wd[g.id]["10007"]||"0",10)>=slots)rw++; }); tot[g.id]={_skip:false,_slots:aw>0?Math.round(ss/aw):g.slots,_activeWeeks:aw,_rendWeeks:rw,...ft}; }); return{totals:tot,weekCount:rel.length}; }
+
+  const monthData=getMonthData(monthKey);
+  const availableMonths=[...new Set(sortedWeekKeys.map(getMonthKey))].sort().reverse();
+  const mergedHistData=(historyWeek&&weeks[historyWeek])?(()=>{ const m={}; DEFAULT_GROUPS.forEach(g=>{ m[g.id]=weeks[historyWeek][g.id]?weeks[historyWeek][g.id]:emptyFormRow(g.slots); if(m[g.id]._slots==null)m[g.id]._slots=g.slots; }); return m; })():null;
+  const tabs=[{id:"invoer",label:"Invoer",icon:"ti-edit"},{id:"week",label:"Weekoverzicht",icon:"ti-chart-bar"},{id:"maand",label:"Maandoverzicht",icon:"ti-calendar"}];
+
+  return <div style={{fontFamily:"'Outfit',sans-serif"}}>
+    <SyncBar status={syncStatus} msg={syncMsg}/>
+    <div style={{background:BRAND.green,padding:"18px 24px 0",borderRadius:"12px 12px 0 0"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+        <div style={{width:36,height:36,borderRadius:8,background:BRAND.orange,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <i className="ti ti-activity" style={{fontSize:20,color:"#fff"}}/>
+        </div>
+        <div>
+          <div style={{fontSize:16,fontWeight:600,color:"#fff"}}>FyzioFit uren</div>
+          <div style={{fontSize:11,color:"rgba(255,255,255,0.6)"}}>Fyzio Totaal — Rendabiliteitsmonitor</div>
+        </div>
+        <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:6,background:"rgba(255,255,255,0.12)",borderRadius:6,padding:"4px 10px",fontSize:11,color:"rgba(255,255,255,0.75)"}}>
+          <i className="ti ti-cloud" style={{fontSize:13}}/> Gedeelde opslag
+        </div>
+      </div>
+      <div style={{display:"flex",gap:2}}>
+        {tabs.map(t=><button key={t.id} onClick={()=>setTab(t.id)} style={{background:tab===t.id?"#fff":"transparent",border:"none",borderRadius:"8px 8px 0 0",padding:"8px 16px",fontSize:13,fontWeight:tab===t.id?500:400,color:tab===t.id?BRAND.green:"rgba(255,255,255,0.75)",cursor:"pointer",display:"flex",alignItems:"center",gap:6,transition:"all 0.15s",fontFamily:"'Outfit',sans-serif"}}>
+          <i className={"ti "+t.icon} style={{fontSize:14}}/>{t.label}
+        </button>)}
+      </div>
+    </div>
+
+    <div style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderTop:"none",borderRadius:"0 0 12px 12px",padding:"20px"}}>
+      {!loaded&&<div style={{textAlign:"center",padding:"3rem",color:BRAND.textMuted}}><i className="ti ti-loader-2 spin" style={{fontSize:32,display:"block",marginBottom:8}}/> Data laden…</div>}
+
+      {loaded&&tab==="invoer"&&<div>
+        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:"1.25rem",flexWrap:"wrap",background:BRAND.gray,borderRadius:8,padding:"10px 14px",border:"0.5px solid "+BRAND.border}}>
+          <i className="ti ti-calendar" style={{fontSize:16,color:BRAND.textMuted}}/><label style={{fontSize:13,color:BRAND.textMuted,fontWeight:500}}>Week van maandag</label>
+          <input type="date" value={currentMonday} onChange={e=>{setCurrentMonday(e.target.value);setSavedOk(false);}}/>
+          <span style={{fontSize:12,color:BRAND.textMuted}}>{formatWeekLabel(currentMonday)}</span>
+          {weeks[currentMonday]&&<Pill color={BRAND.green} bg={BRAND.greenLight}>Eerder opgeslagen</Pill>}
+        </div>
+        <div style={{marginBottom:"1rem",display:"flex",gap:12,flexWrap:"wrap",alignItems:"center"}}>
+          {FINANCE.map(fc=><span key={fc} style={{display:"flex",alignItems:"center",gap:5,fontSize:12,color:BRAND.textMuted}}><span style={{width:8,height:8,borderRadius:2,background:BRAND.green}}/>{fc} – {FINANCE_LABELS[fc]}</span>)}
+          <span style={{fontSize:12,color:BRAND.textMuted,marginLeft:"auto",display:"flex",alignItems:"center",gap:4}}><i className="ti ti-info-circle" style={{fontSize:12}}/>Pas zittingen aan bij vroeg starten</span>
+        </div>
+        <GroupTable data={formData} groups={DEFAULT_GROUPS} editable={true} onToggleSkip={toggleSkip} onSlotsChange={setSlots} onValChange={setVal}/>
+        <div style={{marginTop:"1rem",display:"flex",alignItems:"center",gap:12}}>
+          <button onClick={handleSave} disabled={saving} style={{background:BRAND.orange,color:"#fff",border:"none",borderRadius:8,padding:"9px 24px",fontSize:13,fontWeight:500,cursor:saving?"not-allowed":"pointer",display:"flex",alignItems:"center",gap:6,opacity:saving?0.7:1,fontFamily:"'Outfit',sans-serif"}}>
+            <i className={"ti "+(saving?"ti-loader-2 spin":"ti-device-floppy")} style={{fontSize:15}}/>{saving?"Opslaan…":"Opslaan"}
+          </button>
+          {savedOk&&<span style={{fontSize:13,color:BRAND.success,display:"flex",alignItems:"center",gap:4}}><i className="ti ti-cloud-check" style={{fontSize:15}}/>Opgeslagen en gesynchroniseerd</span>}
+        </div>
+        <div style={{marginTop:"1.5rem"}}>
+          <div style={{fontSize:13,fontWeight:500,color:BRAND.textMuted,marginBottom:10,display:"flex",alignItems:"center",gap:6}}><i className="ti ti-users" style={{fontSize:14}}/>Overzicht per collega</div>
+          <CollegaCards data={formData} groups={DEFAULT_GROUPS}/>
+        </div>
+      </div>}
+
+      {loaded&&tab==="week"&&<div>
+        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:"1.25rem",flexWrap:"wrap",background:BRAND.gray,borderRadius:8,padding:"10px 14px",border:"0.5px solid "+BRAND.border}}>
+          <i className="ti ti-calendar" style={{fontSize:16,color:BRAND.textMuted}}/><label style={{fontSize:13,color:BRAND.textMuted,fontWeight:500}}>Kies week</label>
+          <select value={historyWeek} onChange={e=>setHistoryWeek(e.target.value)}>
+            {sortedWeekKeys.length===0&&<option value="">Nog geen weken opgeslagen</option>}
+            {sortedWeekKeys.map(k=><option key={k} value={k}>{formatWeekLabel(k)}</option>)}
+          </select>
+        </div>
+        {mergedHistData?<>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:12,marginBottom:"1.25rem"}}>
+            <MetricCard label="Totaal declarabel" value={totalDecl(mergedHistData,DEFAULT_GROUPS)} sub="patiënten (10007)"/>
+            <MetricCard label="Totaal gezien" value={totalAll(mergedHistData,DEFAULT_GROUPS)} sub="alle financieringstypen" accent={true}/>
+            <MetricCard label="Rendabele groepen" value={DEFAULT_GROUPS.filter(g=>!isSkipped(mergedHistData,g.id)&&isRendabel(g,mergedHistData)).length+"/"+DEFAULT_GROUPS.filter(g=>!isSkipped(mergedHistData,g.id)).length} sub="van actieve groepen"/>
+          </div>
+          <GroupTable data={mergedHistData} groups={DEFAULT_GROUPS}/>
+          <div style={{marginTop:"1.5rem"}}><CollegaCards data={mergedHistData} groups={DEFAULT_GROUPS}/></div>
+        </>:<div style={{textAlign:"center",padding:"2rem",color:BRAND.textMuted,fontSize:13}}><i className="ti ti-mood-empty" style={{fontSize:32,display:"block",marginBottom:8}}/>Geen data voor deze week.</div>}
+      </div>}
+
+      {loaded&&tab==="maand"&&<div>
+        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:"1.25rem",flexWrap:"wrap",background:BRAND.gray,borderRadius:8,padding:"10px 14px",border:"0.5px solid "+BRAND.border}}>
+          <i className="ti ti-calendar-month" style={{fontSize:16,color:BRAND.textMuted}}/><label style={{fontSize:13,color:BRAND.textMuted,fontWeight:500}}>Kies maand</label>
+          <select value={monthKey} onChange={e=>setMonthKey(e.target.value)}>
+            {availableMonths.length===0&&<option value="">Nog geen data</option>}
+            {availableMonths.map(mk=>{const p=mk.split("-");const l=new Date(parseInt(p[0]),parseInt(p[1])-1,1).toLocaleDateString("nl-NL",{month:"long",year:"numeric"});return<option key={mk} value={mk}>{l}</option>;})}
+          </select>
+        </div>
+        {monthData?<>
+          <div style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:BRAND.textMuted,marginBottom:"1rem",background:BRAND.orangeLight,borderRadius:6,padding:"7px 12px",border:"0.5px solid #f0c090"}}>
+            <i className="ti ti-info-circle" style={{fontSize:14}}/>Gebaseerd op {monthData.weekCount} {monthData.weekCount!==1?"weken":"week"} in deze maand
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:12,marginBottom:"1.25rem"}}>
+            <MetricCard label="Totaal declarabel" value={DEFAULT_GROUPS.reduce((s,g)=>s+parseInt(monthData.totals[g.id]["10007"]||"0",10),0)} sub="patiënten (10007)"/>
+            <MetricCard label="Totaal patiënten" value={DEFAULT_GROUPS.reduce((s,g)=>FINANCE.reduce((ss,fc)=>ss+parseInt(monthData.totals[g.id][fc]||"0",10),s),0)} sub="alle typen" accent={true}/>
+            <MetricCard label="Weken geregistreerd" value={monthData.weekCount} sub="in deze maand"/>
+          </div>
+          <MonthGroupTable data={monthData.totals} groups={DEFAULT_GROUPS}/>
+          <div style={{marginTop:"1.5rem"}}><CollegaCards data={monthData.totals} groups={DEFAULT_GROUPS}/></div>
+        </>:<div style={{textAlign:"center",padding:"2rem",color:BRAND.textMuted,fontSize:13}}><i className="ti ti-mood-empty" style={{fontSize:32,display:"block",marginBottom:8}}/>Geen data voor deze maand.</div>}
+      </div>}
+
+      <div style={{marginTop:"1.5rem",paddingTop:"1rem",borderTop:"0.5px solid "+BRAND.border,display:"flex",gap:16,flexWrap:"wrap",fontSize:11,color:BRAND.textMuted,alignItems:"center"}}>
+        <span style={{display:"flex",alignItems:"center",gap:5}}><span style={{width:8,height:8,borderRadius:"50%",background:BRAND.success}}/>Rendabel</span>
+        <span style={{display:"flex",alignItems:"center",gap:5}}><span style={{width:8,height:8,borderRadius:"50%",background:BRAND.danger}}/>Niet rendabel</span>
+        <span style={{display:"flex",alignItems:"center",gap:5}}><span style={{width:8,height:8,borderRadius:"50%",background:"#ccc"}}/>Vervallen</span>
+        <span style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:4}}><i className="ti ti-cloud-check" style={{fontSize:12}}/>Gedeelde Supabase-database</span>
+      </div>
+    </div>
+  </div>;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+</script>
+</body>
+</html>
