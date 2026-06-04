@@ -5,54 +5,67 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>FyzioFit Uren — Fyzio Totaal</title>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css" />
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Outfit', sans-serif; background: #f5f5f3; min-height: 100vh; }
-    #root { max-width: 960px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+    #root { max-width: 980px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
     input[type=number]::-webkit-inner-spin-button,
     input[type=number]::-webkit-outer-spin-button { opacity: 1; }
-    input[type=date] { padding: 5px 8px; border: 1px solid #e0e0da; border-radius: 6px; font-family: 'Outfit', sans-serif; font-size: 13px; background: #fff; color: #1a1a1a; }
-    select { padding: 5px 8px; border: 1px solid #e0e0da; border-radius: 6px; font-family: 'Outfit', sans-serif; font-size: 13px; background: #fff; color: #1a1a1a; }
-    .sync-bar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 8px; margin-bottom: 1rem; font-size: 12px; font-weight: 500; border: 1px solid; }
-    .sync-bar.ok    { background: #e6f4ec; color: #1a7a4a; border-color: #b2dfc4; }
-    .sync-bar.error { background: #fdecea; color: #c0392b; border-color: #f5b7b1; }
-    .sync-bar.loading { background: #fef3dc; color: #b45309; border-color: #f5d98a; }
-    .sync-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-    .sync-dot.ok    { background: #1a7a4a; }
-    .sync-dot.error { background: #c0392b; }
-    .sync-dot.loading { background: #b45309; animation: pulse 1s infinite; }
+    input[type=date], select {
+      padding: 5px 8px; border: 1px solid #e0e0da; border-radius: 6px;
+      font-family: 'Outfit', sans-serif; font-size: 13px; background: #fff; color: #1a1a1a;
+    }
+    .sync-bar { display:flex; align-items:center; gap:8px; padding:8px 14px; border-radius:8px; margin-bottom:1rem; font-size:12px; font-weight:500; border:1px solid; }
+    .sync-bar.ok    { background:#e6f4ec; color:#1a7a4a; border-color:#b2dfc4; }
+    .sync-bar.error { background:#fdecea; color:#c0392b; border-color:#f5b7b1; }
+    .sync-bar.loading { background:#fef3dc; color:#b45309; border-color:#f5d98a; }
+    .sync-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+    .sync-dot.ok    { background:#1a7a4a; }
+    .sync-dot.error { background:#c0392b; }
+    .sync-dot.loading { background:#b45309; animation:pulse 1s infinite; }
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .spin { animation: spin 1s linear infinite; display: inline-block; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    .spin { animation:spin 1s linear infinite; display:inline-block; }
   </style>
 </head>
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const { useState, useEffect } = React;
+const { useState, useEffect, useCallback, useMemo, memo } = React;
 
+// ── SUPABASE ─────────────────────────────────────────────────────────────
 const SB_URL = "https://szunargvsmtzbbnmnghc.supabase.co/rest/v1";
 const SB_KEY = "sb_publishable_EiIt1zJuqgjj-2FJ4mXTlg__kmUrPu5";
-const SB_HDR = { "apikey": SB_KEY, "Authorization": "Bearer " + SB_KEY, "Content-Type": "application/json", "Prefer": "resolution=merge-duplicates" };
+const SB_HDR = { "apikey":SB_KEY, "Authorization":"Bearer "+SB_KEY, "Content-Type":"application/json", "Prefer":"resolution=merge-duplicates" };
 
-async function sbLoadWeeks() {
-  const r = await fetch(SB_URL + "/fyziofit_weeks?select=*&order=id.asc", { headers: SB_HDR });
-  if (!r.ok) throw new Error("HTTP " + r.status);
+async function loadAll() {
+  const r = await fetch(SB_URL+"/fyziofit_weeks?select=*&order=id.asc", { headers:SB_HDR });
+  if (!r.ok) throw new Error("HTTP "+r.status);
   const rows = await r.json();
   const out = {};
   rows.forEach(row => { out[row.id] = row.data; });
   return out;
 }
-async function sbSaveWeek(mondayStr, data) {
-  const r = await fetch(SB_URL + "/fyziofit_weeks", { method: "POST", headers: SB_HDR, body: JSON.stringify({ id: mondayStr, data: data, updated_at: new Date().toISOString() }) });
-  if (!r.ok) { const t = await r.text(); throw new Error("HTTP " + r.status + ": " + t); }
+async function saveWeek(mondayStr, data) {
+  const r = await fetch(SB_URL+"/fyziofit_weeks", {
+    method:"POST", headers:SB_HDR,
+    body: JSON.stringify({ id:mondayStr, data:data, updated_at:new Date().toISOString() })
+  });
+  if (!r.ok) { const t=await r.text(); throw new Error("HTTP "+r.status+": "+t); }
 }
 
-const BRAND = { green:"#1a4a3a", greenMid:"#2a6b52", greenLight:"#e8f2ee", orange:"#e8611a", orangeLight:"#fdf0e8", gray:"#f5f5f3", border:"#e0e0da", text:"#1a1a1a", textMuted:"#6b6b65", success:"#1a7a4a", successBg:"#e6f4ec", danger:"#c0392b", dangerBg:"#fdecea", warn:"#b45309", warnBg:"#fef3e2" };
+// ── BRAND + CONSTANTS ────────────────────────────────────────────────────
+const BRAND = {
+  green:"#1a4a3a", greenMid:"#2a6b52", greenLight:"#e8f2ee",
+  orange:"#e8611a", orangeLight:"#fdf0e8",
+  gray:"#f5f5f3", border:"#e0e0da", text:"#1a1a1a", textMuted:"#6b6b65",
+  success:"#1a7a4a", successBg:"#e6f4ec",
+  danger:"#c0392b", dangerBg:"#fdecea",
+  warn:"#b45309", warnBg:"#fef3e2",
+};
 const DEFAULT_GROUPS = [
   { id:"ma13", day:"Maandag",   time:"13:00", collega:"Jan Willem", slots:2 },
   { id:"ma16", day:"Maandag",   time:"16:10", collega:"Lars",       slots:3 },
@@ -69,236 +82,573 @@ const FINANCE = ["10007","10008","10009","998"];
 const FINANCE_LABELS = {"10007":"Declarabel","10008":"Zorgplan","10009":"Abonnement","998":"Zonder decl."};
 const GROUP_DAY_INDEX = { ma13:0,ma16:0,di13:1,di16:1,wo13:2,wo16:2,do13:3,do16:3,vr13:4,vr16:4 };
 
+// ── HELPERS ──────────────────────────────────────────────────────────────
 function getMondayStr(d) { const day=d.getDay(),diff=d.getDate()-day+(day===0?-6:1); const m=new Date(d); m.setDate(diff); return m.toISOString().slice(0,10); }
 function formatWeekLabel(s) { const mon=new Date(s+"T00:00:00"),fri=new Date(mon); fri.setDate(mon.getDate()+4); return mon.getDate()+" – "+fri.toLocaleDateString("nl-NL",{day:"numeric",month:"long",year:"numeric"}); }
 function getMonthKey(s) { return s.slice(0,7); }
-function emptyFormRow(slots) { const row={_skip:false,_slots:slots}; FINANCE.forEach(fc=>{row[fc]="";}); return row; }
-function emptyForm(groups) { const f={}; groups.forEach(g=>{f[g.id]=emptyFormRow(g.slots);}); return f; }
-function getDecl(data,gid) { return parseInt(data[gid]&&data[gid]["10007"]?data[gid]["10007"]:"0",10); }
-function isSkipped(data,gid) { return data[gid]&&data[gid]._skip===true; }
-function effectiveSlots(data,g) { return (data[g.id]&&data[g.id]._slots!=null)?data[g.id]._slots:g.slots; }
-function isRendabel(g,data) { return !isSkipped(data,g.id)&&getDecl(data,g.id)>=effectiveSlots(data,g); }
-function totalDecl(data,groups) { return groups.filter(g=>!isSkipped(data,g.id)).reduce((s,g)=>s+getDecl(data,g.id),0); }
-function totalAll(data,groups) { return groups.filter(g=>!isSkipped(data,g.id)).reduce((s,g)=>FINANCE.reduce((ss,fc)=>ss+parseInt((data[g.id]&&data[g.id][fc])?data[g.id][fc]:"0",10),s),0); }
+function emptyRow(slots) { const r={_skip:false,_slots:slots}; FINANCE.forEach(fc=>{r[fc]="";}); return r; }
+function emptyForm() { const f={}; DEFAULT_GROUPS.forEach(g=>{f[g.id]=emptyRow(g.slots);}); return f; }
+function getVal(row,fc) { return parseInt(row&&row[fc]?row[fc]:"0",10)||0; }
+function getSlots(row,g) { return (row&&row._slots!=null)?row._slots:g.slots; }
+function isSkip(row) { return row&&row._skip===true; }
+function isRend(row,g) { return !isSkip(row)&&getVal(row,"10007")>=getSlots(row,g); }
 
-function SyncBar({status,msg}) {
-  const labels={ok:"Gesynchroniseerd met gedeelde database",error:"Synchronisatiefout",loading:"Verbinden met database…"};
-  return <div className={"sync-bar "+status}><div className={"sync-dot "+status}/><span>{labels[status]}{msg?" — "+msg:""}</span></div>;
-}
-function Pill({color,bg,children}) { return <span style={{display:"inline-block",padding:"2px 10px",borderRadius:20,fontSize:12,fontWeight:500,background:bg,color:color}}>{children}</span>; }
+// ── SHARED STATE via Context ─────────────────────────────────────────────
+const WeeksCtx = React.createContext({weeks:{}, reload:()=>{}, syncStatus:"loading", syncMsg:""});
+
+// ── SUB-COMPONENTS ───────────────────────────────────────────────────────
+const NumInput = memo(function NumInput({value,onChange,disabled}) {
+  return <input type="number" min="0" value={value} disabled={disabled} onChange={e=>onChange(e.target.value)}
+    style={{width:48,textAlign:"center",fontSize:13,padding:"5px 2px",border:"1px solid "+BRAND.border,borderRadius:6,background:disabled?"#f5f5f3":"#fff",color:BRAND.text,outline:"none"}}/>;
+});
+const SlotsInput = memo(function SlotsInput({value,onChange}) {
+  return <input type="number" min="1" max="6" value={value} onChange={e=>onChange(e.target.value)}
+    style={{width:44,textAlign:"center",fontSize:13,padding:"4px 2px",border:"1px solid "+BRAND.border,borderRadius:6,background:"#fff",color:BRAND.text,outline:"none"}}/>;
+});
 function Badge({ok,skipped}) {
-  if(skipped) return <span style={{display:"inline-flex",alignItems:"center",gap:4,padding:"2px 8px",borderRadius:20,fontSize:11,fontWeight:500,background:"#f0f0ee",color:BRAND.textMuted}}><i className="ti ti-ban" style={{fontSize:11}}/>Vervallen</span>;
+  if(skipped) return <span style={{display:"inline-flex",alignItems:"center",gap:4,padding:"2px 8px",borderRadius:20,fontSize:11,fontWeight:500,background:"#f0f0ee",color:BRAND.textMuted}}>Vervallen</span>;
   return <span style={{display:"inline-flex",alignItems:"center",gap:4,padding:"2px 8px",borderRadius:20,fontSize:11,fontWeight:500,background:ok?BRAND.successBg:BRAND.dangerBg,color:ok?BRAND.success:BRAND.danger}}><span style={{width:6,height:6,borderRadius:"50%",background:ok?BRAND.success:BRAND.danger}}/>{ok?"Rendabel":"Niet rendabel"}</span>;
 }
-function MetricCard({label,value,sub,accent}) {
-  return <div style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderRadius:12,padding:"14px 18px",borderTop:"3px solid "+(accent?BRAND.orange:BRAND.greenMid)}}><div style={{fontSize:12,color:BRAND.textMuted,marginBottom:4,textTransform:"uppercase",letterSpacing:"0.5px"}}>{label}</div><div style={{fontSize:26,fontWeight:600,color:BRAND.text,lineHeight:1}}>{value}</div>{sub&&<div style={{fontSize:12,color:BRAND.textMuted,marginTop:4}}>{sub}</div>}</div>;
+const InvoerRow = memo(function InvoerRow({g,row,onVal,onSlots,onSkip}) {
+  const skipped=isSkip(row),slots=getSlots(row,g),rend=isRend(row,g);
+  return (
+    <tr style={{borderBottom:"0.5px solid "+BRAND.border,background:skipped?"#f7f7f5":"#fff",opacity:skipped?0.6:1}}>
+      <td style={{padding:"8px 10px",fontWeight:500,color:BRAND.text,whiteSpace:"nowrap"}}>{g.day}</td>
+      <td style={{padding:"8px 10px",color:BRAND.textMuted}}>{g.time}</td>
+      <td style={{padding:"8px 10px",color:BRAND.text}}>{g.collega}</td>
+      <td style={{textAlign:"center",padding:"6px 8px"}}>{skipped?<span style={{color:BRAND.textMuted}}>—</span>:<SlotsInput value={slots} onChange={v=>onSlots(g.id,v)}/>}</td>
+      {FINANCE.map(fc=><td key={fc} style={{textAlign:"center",padding:"6px 6px"}}>{skipped?<span style={{fontSize:12,color:BRAND.textMuted}}>—</span>:<NumInput value={row[fc]} onChange={v=>onVal(g.id,fc,v)} disabled={false}/>}</td>)}
+      <td style={{textAlign:"center",padding:"8px 10px"}}><Badge ok={rend} skipped={skipped}/></td>
+      <td style={{textAlign:"center",padding:"6px 8px"}}>
+        <button onClick={()=>onSkip(g.id)} style={{background:"transparent",border:"0.5px solid "+BRAND.border,borderRadius:6,padding:"4px 8px",cursor:"pointer",color:skipped?BRAND.green:BRAND.textMuted,fontSize:12,fontFamily:"'Outfit',sans-serif"}}>
+          {skipped?"Herstel":"Vervallen"}
+        </button>
+      </td>
+    </tr>
+  );
+});
+
+// ── SYNC BAR ─────────────────────────────────────────────────────────────
+function SyncBar({status,msg}) {
+  const labels={ok:"Gesynchroniseerd met gedeelde database",error:"Synchronisatiefout",loading:"Verbinden…"};
+  return <div className={"sync-bar "+status}><div className={"sync-dot "+status}/><span>{labels[status]}{msg?" — "+msg:""}</span></div>;
 }
 
-function CollegaCards({data,groups}) {
-  const collegas=[...new Set(groups.map(g=>g.collega))];
-  return <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10,marginTop:4}}>{collegas.map(c=>{
-    const cg=groups.filter(g=>g.collega===c),activeCg=cg.filter(g=>!isSkipped(data,g.id));
-    const decl=activeCg.reduce((s,g)=>s+getDecl(data,g.id),0),tot=activeCg.reduce((s,g)=>FINANCE.reduce((ss,fc)=>ss+parseInt((data[g.id]&&data[g.id][fc])?data[g.id][fc]:"0",10),s),0);
-    const rend=activeCg.filter(g=>isRendabel(g,data)).length,total=activeCg.length;
-    const allGood=total>0&&rend===total,noneGood=total===0||rend===0,allSkipped=cg.every(g=>isSkipped(data,g.id));
-    return <div key={c} style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderRadius:10,padding:"12px 14px",borderLeft:"3px solid "+(allSkipped?"#ccc":allGood?BRAND.greenMid:noneGood?BRAND.danger:BRAND.warn),opacity:allSkipped?0.5:1}}>
-      <div style={{fontSize:13,fontWeight:500,color:BRAND.text,marginBottom:6}}>{c}</div>
-      {allSkipped?<div style={{fontSize:11,color:BRAND.textMuted}}>Alle groepen vervallen</div>:<>
-        <div style={{fontSize:22,fontWeight:600,color:BRAND.green}}>{decl}</div>
-        <div style={{fontSize:11,color:BRAND.textMuted,marginBottom:6}}>declarabel / {tot} totaal</div>
-        <div style={{fontSize:11,fontWeight:500,color:allGood?BRAND.success:noneGood?BRAND.danger:BRAND.warn}}>{rend}/{total} groepen rendabel</div>
-      </>}
+// ── INVOER TAB ───────────────────────────────────────────────────────────
+function InvoerTab({formData,setFormData}) {
+  const {weeks,reload,syncStatus,syncMsg} = React.useContext(WeeksCtx);
+  const [currentMonday,setCurrentMonday] = useState(getMondayStr(new Date()));
+  const [saved,setSaved] = useState(false);
+  const [saving,setSaving] = useState(false);
+  const [saveErr,setSaveErr] = useState("");
+
+  useEffect(()=>{
+    if(!Object.keys(weeks).length) return;
+    if(weeks[currentMonday]){
+      const m={};
+      DEFAULT_GROUPS.forEach(g=>{ m[g.id]={...emptyRow(g.slots),...(weeks[currentMonday][g.id]||{})}; if(m[g.id]._slots==null)m[g.id]._slots=g.slots; });
+      setFormData(m);
+    } else { setFormData(emptyForm()); }
+    setSaved(false);
+  },[currentMonday,weeks]);
+
+  const onVal=useCallback((gid,fc,v)=>{ setFormData(p=>({...p,[gid]:{...p[gid],[fc]:v===""?"":String(Math.max(0,parseInt(v)||0))}})); setSaved(false); },[]);
+  const onSlots=useCallback((gid,v)=>{ setFormData(p=>({...p,[gid]:{...p[gid],_slots:Math.max(1,Math.min(6,parseInt(v)||1))}})); setSaved(false); },[]);
+  const onSkip=useCallback((gid)=>{ setFormData(p=>{ const row={...p[gid],_skip:!p[gid]._skip}; if(row._skip)FINANCE.forEach(fc=>{row[fc]="";}); return {...p,[gid]:row}; }); setSaved(false); },[]);
+
+  async function handleSave() {
+    setSaving(true); setSaveErr("");
+    try {
+      await saveWeek(currentMonday, formData);
+      await reload();
+      setSaved(true);
+    } catch(e) { setSaveErr(e.message); }
+    finally { setSaving(false); }
+  }
+
+  const collegaStats=useMemo(()=>{
+    const collegas=[...new Set(DEFAULT_GROUPS.map(g=>g.collega))];
+    return collegas.map(c=>{
+      const cg=DEFAULT_GROUPS.filter(g=>g.collega===c),active=cg.filter(g=>!isSkip(formData[g.id]));
+      const decl=active.reduce((s,g)=>s+getVal(formData[g.id],"10007"),0);
+      const tot=active.reduce((s,g)=>FINANCE.reduce((ss,fc)=>ss+getVal(formData[g.id],fc),s),0);
+      const rend=active.filter(g=>isRend(formData[g.id],g)).length;
+      return {c,decl,tot,rend,total:active.length,allSkipped:cg.every(g=>isSkip(formData[g.id]))};
+    });
+  },[formData]);
+
+  return (
+    <div>
+      <SyncBar status={syncStatus} msg={syncMsg}/>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:"1.25rem",flexWrap:"wrap",background:BRAND.gray,borderRadius:8,padding:"10px 14px",border:"0.5px solid "+BRAND.border}}>
+        <label style={{fontSize:13,color:BRAND.textMuted,fontWeight:500}}>Week van maandag</label>
+        <input type="date" value={currentMonday} onChange={e=>{setCurrentMonday(e.target.value);setSaved(false);}}/>
+        <span style={{fontSize:12,color:BRAND.textMuted}}>{formatWeekLabel(currentMonday)}</span>
+        {weeks[currentMonday]&&<span style={{padding:"2px 10px",borderRadius:20,fontSize:12,fontWeight:500,background:BRAND.greenLight,color:BRAND.green}}>Eerder opgeslagen</span>}
+      </div>
+      <div style={{marginBottom:"0.75rem",display:"flex",gap:16,flexWrap:"wrap"}}>
+        {FINANCE.map(fc=><span key={fc} style={{display:"flex",alignItems:"center",gap:5,fontSize:12,color:BRAND.textMuted}}><span style={{width:8,height:8,borderRadius:2,background:BRAND.green}}/>{fc} – {FINANCE_LABELS[fc]}</span>)}
+      </div>
+      <div style={{overflowX:"auto",borderRadius:10,border:"0.5px solid "+BRAND.border,marginBottom:"1rem"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+          <thead><tr style={{background:BRAND.green}}>
+            {["Dag","Tijd","Collega","Zittingen",...FINANCE,"Status",""].map((h,i)=>(
+              <th key={i} style={{textAlign:i>3?"center":"left",padding:"9px 10px",fontWeight:500,fontSize:12,color:"rgba(255,255,255,0.85)",whiteSpace:"nowrap"}}>{h}</th>
+            ))}
+          </tr></thead>
+          <tbody>{DEFAULT_GROUPS.map(g=><InvoerRow key={g.id} g={g} row={formData[g.id]||emptyRow(g.slots)} onVal={onVal} onSlots={onSlots} onSkip={onSkip}/>)}</tbody>
+        </table>
+      </div>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:"1.5rem"}}>
+        <button onClick={handleSave} disabled={saving} style={{background:BRAND.orange,color:"#fff",border:"none",borderRadius:8,padding:"9px 24px",fontSize:13,fontWeight:500,cursor:saving?"not-allowed":"pointer",opacity:saving?0.7:1,fontFamily:"'Outfit',sans-serif"}}>
+          {saving?"Opslaan…":"Opslaan"}
+        </button>
+        {saved&&<span style={{fontSize:13,color:BRAND.success}}>☁ Opgeslagen en gesynchroniseerd</span>}
+        {saveErr&&<span style={{fontSize:13,color:BRAND.danger}}>⚠ {saveErr}</span>}
+      </div>
+      <div style={{fontSize:13,fontWeight:500,color:BRAND.textMuted,marginBottom:10}}>Overzicht per collega</div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10}}>
+        {collegaStats.map(({c,decl,tot,rend,total,allSkipped})=>{
+          const allGood=total>0&&rend===total,noneGood=total===0||rend===0;
+          return <div key={c} style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderRadius:10,padding:"12px 14px",borderLeft:"3px solid "+(allSkipped?"#ccc":allGood?BRAND.greenMid:noneGood?BRAND.danger:BRAND.warn),opacity:allSkipped?0.5:1}}>
+            <div style={{fontSize:13,fontWeight:500,color:BRAND.text,marginBottom:6}}>{c}</div>
+            {allSkipped?<div style={{fontSize:11,color:BRAND.textMuted}}>Alle groepen vervallen</div>:<>
+              <div style={{fontSize:22,fontWeight:600,color:BRAND.green}}>{decl}</div>
+              <div style={{fontSize:11,color:BRAND.textMuted,marginBottom:6}}>declarabel / {tot} totaal</div>
+              <div style={{fontSize:11,fontWeight:500,color:allGood?BRAND.success:noneGood?BRAND.danger:BRAND.warn}}>{rend}/{total} groepen rendabel</div>
+            </>}
+          </div>;
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── WEEK TAB ─────────────────────────────────────────────────────────────
+function WeekTab() {
+  const {weeks} = React.useContext(WeeksCtx);
+  const [historyWeek,setHistoryWeek] = useState("");
+  const sortedKeys = useMemo(()=>Object.keys(weeks).sort().reverse(),[weeks]);
+  useEffect(()=>{ if(sortedKeys.length&&!historyWeek) setHistoryWeek(sortedKeys[0]); },[sortedKeys]);
+
+  const data = useMemo(()=>{
+    if(!historyWeek||!weeks[historyWeek]) return null;
+    const m={};
+    DEFAULT_GROUPS.forEach(g=>{ m[g.id]={...emptyRow(g.slots),...(weeks[historyWeek][g.id]||{})}; if(m[g.id]._slots==null)m[g.id]._slots=g.slots; });
+    return m;
+  },[historyWeek,weeks]);
+
+  const stats = useMemo(()=>{
+    if(!data) return null;
+    const active=DEFAULT_GROUPS.filter(g=>!isSkip(data[g.id]));
+    const totalSlots=active.reduce((s,g)=>s+getSlots(data[g.id],g),0);
+    const totalPats=active.reduce((s,g)=>FINANCE.reduce((ss,fc)=>ss+getVal(data[g.id],fc),s),0);
+    const totalDecl=active.reduce((s,g)=>s+getVal(data[g.id],"10007"),0);
+    return {totalSlots,totalPats,totalDecl,bezetting:totalSlots>0?Math.round((totalPats/totalSlots)*100):0,bezettingDecl:totalSlots>0?Math.round((totalDecl/totalSlots)*100):0};
+  },[data]);
+
+  return (
+    <div>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:"1.25rem",flexWrap:"wrap",background:BRAND.gray,borderRadius:8,padding:"10px 14px",border:"0.5px solid "+BRAND.border}}>
+        <label style={{fontSize:13,color:BRAND.textMuted,fontWeight:500}}>Kies week</label>
+        <select value={historyWeek} onChange={e=>setHistoryWeek(e.target.value)}>
+          {!sortedKeys.length&&<option>Nog geen weken opgeslagen</option>}
+          {sortedKeys.map(k=><option key={k} value={k}>{formatWeekLabel(k)}</option>)}
+        </select>
+      </div>
+      {stats&&data?<>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:"1.5rem"}}>
+          {[{label:"Opengestelde zittingen",value:stats.totalSlots,sub:stats.bezetting+"% bezetting",color:BRAND.greenMid},
+            {label:"Totaal patiënten",value:stats.totalPats,sub:stats.bezetting+"% bezetting",color:stats.bezetting>=100?BRAND.success:stats.bezetting>=75?BRAND.warn:BRAND.danger},
+            {label:"Totaal declarabel",value:stats.totalDecl,sub:stats.bezettingDecl+"% van zittingen",color:stats.bezettingDecl>=100?BRAND.success:stats.bezettingDecl>=75?BRAND.warn:BRAND.danger},
+          ].map(({label,value,sub,color})=>(
+            <div key={label} style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderRadius:12,padding:"16px 18px",borderTop:"3px solid "+color,textAlign:"center"}}>
+              <div style={{fontSize:36,fontWeight:700,color:BRAND.text,lineHeight:1}}>{value}</div>
+              <div style={{fontSize:12,color:BRAND.textMuted,margin:"4px 0 6px"}}>{label}</div>
+              <span style={{padding:"2px 10px",borderRadius:20,fontSize:11,fontWeight:500,background:color+"22",color}}>{sub}</span>
+            </div>
+          ))}
+        </div>
+        <div style={{overflowX:"auto",borderRadius:10,border:"0.5px solid "+BRAND.border}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+            <thead><tr style={{background:BRAND.green}}>
+              {["Dag","Tijd","Collega","Zittingen","Patiënten","Declarabel","Status"].map((h,i)=>(
+                <th key={i} style={{textAlign:i>2?"center":"left",padding:"8px 10px",fontWeight:500,fontSize:12,color:"rgba(255,255,255,0.85)",whiteSpace:"nowrap"}}>{h}</th>
+              ))}
+            </tr></thead>
+            <tbody>{DEFAULT_GROUPS.map((g,i)=>{
+              const row=data[g.id],skipped=isSkip(row),slots=getSlots(row,g);
+              const pats=FINANCE.reduce((s,fc)=>s+getVal(row,fc),0),decl=getVal(row,"10007");
+              return <tr key={g.id} style={{borderBottom:"0.5px solid "+BRAND.border,background:skipped?"#f7f7f5":i%2===0?"#fff":BRAND.gray,opacity:skipped?0.55:1}}>
+                <td style={{padding:"8px 10px",fontWeight:500}}>{g.day}</td>
+                <td style={{padding:"8px 10px",color:BRAND.textMuted}}>{g.time}</td>
+                <td style={{padding:"8px 10px"}}>{g.collega}</td>
+                <td style={{textAlign:"center",padding:"8px 10px",color:BRAND.textMuted}}>{skipped?"—":slots}</td>
+                <td style={{textAlign:"center",padding:"8px 10px"}}>{skipped?"—":<span style={{fontWeight:pats>0?600:400,color:pats>=slots?BRAND.success:pats>0?BRAND.warn:BRAND.danger}}>{pats}</span>}</td>
+                <td style={{textAlign:"center",padding:"8px 10px"}}>{skipped?"—":<span style={{fontWeight:decl>0?600:400,color:decl>=slots?BRAND.success:decl>0?BRAND.warn:BRAND.danger}}>{decl}</span>}</td>
+                <td style={{textAlign:"center",padding:"8px 10px"}}><Badge ok={isRend(row,g)} skipped={skipped}/></td>
+              </tr>;
+            })}</tbody>
+          </table>
+        </div>
+      </>:<div style={{textAlign:"center",padding:"2rem",color:BRAND.textMuted,fontSize:13}}>Geen data voor deze week.</div>}
+    </div>
+  );
+}
+
+// ── MAAND TAB ─────────────────────────────────────────────────────────────
+function MaandTab() {
+  const {weeks} = React.useContext(WeeksCtx);
+  const sortedWeekKeys = useMemo(()=>Object.keys(weeks).sort().reverse(),[weeks]);
+  const availableMonths = useMemo(()=>[...new Set(sortedWeekKeys.map(getMonthKey))].sort().reverse(),[sortedWeekKeys]);
+  const [monthKey,setMonthKey] = useState("");
+  useEffect(()=>{ if(availableMonths.length&&!monthKey) setMonthKey(availableMonths[0]); },[availableMonths]);
+
+  function getMonthData(mk) {
+    if(!mk) return null;
+    const [y,m]=mk.split("-").map(Number),ms=new Date(y,m-1,1),me=new Date(y,m,0);
+    const rel=sortedWeekKeys.filter(k=>{ const mon=new Date(k+"T00:00:00"),fri=new Date(mon); fri.setDate(mon.getDate()+4); return fri>=ms&&mon<=me; });
+    if(!rel.length) return null;
+    const tot={};
+    DEFAULT_GROUPS.forEach(g=>{
+      const fc={}; FINANCE.forEach(f=>{fc[f]=0;});
+      let aw=0,rw=0,ss=0;
+      rel.forEach(wk=>{ const wd=weeks[wk]; if(!wd||!wd[g.id]||isSkip(wd[g.id])) return; const mon=new Date(wk+"T00:00:00"),gd=new Date(mon); gd.setDate(mon.getDate()+(GROUP_DAY_INDEX[g.id]||0)); if(gd<ms||gd>me) return; aw++; const sl=getSlots(wd[g.id],g); ss+=sl; FINANCE.forEach(f=>{fc[f]+=getVal(wd[g.id],f);}); if(getVal(wd[g.id],"10007")>=sl) rw++; });
+      tot[g.id]={...fc,_skip:false,_slots:aw>0?Math.round(ss/aw):g.slots,_activeWeeks:aw,_rendWeeks:rw};
+    });
+    return tot;
+  }
+
+  const monthData = useMemo(()=>getMonthData(monthKey),[monthKey,weeks]);
+  const MonthSelect = ()=>(
+    <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:"1.25rem",flexWrap:"wrap",background:BRAND.gray,borderRadius:8,padding:"10px 14px",border:"0.5px solid "+BRAND.border}}>
+      <label style={{fontSize:13,color:BRAND.textMuted,fontWeight:500}}>Kies maand</label>
+      <select value={monthKey} onChange={e=>setMonthKey(e.target.value)}>
+        {!availableMonths.length&&<option>Nog geen data</option>}
+        {availableMonths.map(mk=>{const p=mk.split("-");return <option key={mk} value={mk}>{new Date(+p[0],+p[1]-1,1).toLocaleDateString("nl-NL",{month:"long",year:"numeric"})}</option>;})}
+      </select>
+    </div>
+  );
+  if(!monthData) return <div><MonthSelect/><div style={{textAlign:"center",padding:"2rem",color:BRAND.textMuted,fontSize:13}}>Geen data voor deze maand.</div></div>;
+
+  const ag=DEFAULT_GROUPS.filter(g=>monthData[g.id]._activeWeeks>0);
+  const totalSlots=ag.reduce((s,g)=>s+(monthData[g.id]._slots||0)*(monthData[g.id]._activeWeeks||0),0);
+  const totalPats=ag.reduce((s,g)=>FINANCE.reduce((ss,fc)=>ss+getVal(monthData[g.id],fc),s),0);
+  const totalDecl=ag.reduce((s,g)=>s+getVal(monthData[g.id],"10007"),0);
+  const bezetting=totalSlots>0?Math.round((totalPats/totalSlots)*100):0;
+  const bezettingDecl=totalSlots>0?Math.round((totalDecl/totalSlots)*100):0;
+
+  const signals=ag.map(g=>{ const slots=(monthData[g.id]._slots||0)*(monthData[g.id]._activeWeeks||0); const decl=getVal(monthData[g.id],"10007"); const pct=slots>0?Math.round((decl/slots)*100):0; return {g,slots,decl,pct,rendWks:monthData[g.id]._rendWeeks||0,actWks:monthData[g.id]._activeWeeks||0}; }).sort((a,b)=>a.pct-b.pct);
+  const RED=signals.filter(s=>s.pct<75),ORG=signals.filter(s=>s.pct>=75&&s.pct<100),GRN=signals.filter(s=>s.pct>=100);
+
+  function SignalRow({s}) {
+    const color=s.pct>=100?BRAND.success:s.pct>=75?BRAND.warn:BRAND.danger;
+    return <div style={{display:"flex",alignItems:"center",gap:12,padding:"10px 14px",borderBottom:"0.5px solid "+BRAND.border}}>
+      <div style={{minWidth:130,fontSize:13,fontWeight:500,color:BRAND.text}}>{s.g.day} {s.g.time}<div style={{fontSize:11,color:BRAND.textMuted,fontWeight:400}}>{s.g.collega}</div></div>
+      <div style={{flex:1,height:8,background:"#e8e8e4",borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:Math.min(s.pct,100)+"%",background:color,borderRadius:4}}/></div>
+      <div style={{minWidth:44,textAlign:"right",fontWeight:700,fontSize:15,color}}>{s.pct}%</div>
+      <div style={{minWidth:120,fontSize:12,color:BRAND.textMuted,textAlign:"right"}}>{s.decl}/{s.slots} decl. · {s.rendWks}/{s.actWks} wkn</div>
     </div>;
-  })}</div>;
-}
+  }
 
-function GroupTable({data,groups,editable,onToggleSkip,onSlotsChange,onValChange}) {
-  return <div style={{overflowX:"auto",borderRadius:10,border:"0.5px solid "+BRAND.border}}>
-    <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}><thead><tr style={{background:BRAND.green}}>
-      {["Dag","Tijd","Collega","Zittingen"].concat(FINANCE).concat(["Status",editable?"":"Totaal"]).map((h,i)=>(
-        <th key={i} style={{textAlign:i>3?"center":"left",padding:"9px 10px",fontWeight:500,fontSize:12,color:"rgba(255,255,255,0.85)",whiteSpace:"nowrap"}}>{h}</th>
-      ))}
-    </tr></thead><tbody>{groups.map((g,i)=>{
-      const skipped=isSkipped(data,g.id),rend=isRendabel(g,data),slots=effectiveSlots(data,g);
-      const tot=FINANCE.reduce((s,fc)=>s+parseInt((data[g.id]&&data[g.id][fc])?data[g.id][fc]:"0",10),0);
-      return <tr key={g.id} style={{borderBottom:"0.5px solid "+BRAND.border,background:skipped?"#f7f7f5":i%2===0?"#fff":BRAND.gray,opacity:skipped?0.6:1}}>
-        <td style={{padding:"8px 10px",fontWeight:500,color:BRAND.text}}>{g.day}</td>
-        <td style={{padding:"8px 10px",color:BRAND.textMuted}}>{g.time}</td>
-        <td style={{padding:"8px 10px",color:BRAND.text}}>{g.collega}</td>
-        <td style={{textAlign:"center",padding:"6px 8px"}}>{editable&&!skipped?
-          <input type="number" min="1" max="6" value={slots} onChange={e=>onSlotsChange(g.id,e.target.value)} style={{width:44,textAlign:"center",fontSize:13,padding:"4px 2px",border:"1px solid "+BRAND.border,borderRadius:6,background:"#fff",color:BRAND.text,outline:"none"}}/>:
-          <span style={{color:BRAND.textMuted}}>{skipped?"—":slots}</span>}
-        </td>
-        {FINANCE.map(fc=><td key={fc} style={{textAlign:"center",padding:"6px 6px"}}>{editable?(skipped?<span style={{fontSize:12,color:BRAND.textMuted}}>—</span>:
-          <input type="number" min="0" value={data[g.id][fc]} onChange={e=>onValChange(g.id,fc,e.target.value)} style={{width:48,textAlign:"center",fontSize:13,padding:"5px 2px",border:"1px solid "+BRAND.border,borderRadius:6,background:"#fff",color:BRAND.text,outline:"none"}}/>):(
-          <span style={{display:"inline-block",minWidth:24,padding:"1px 7px",borderRadius:12,background:parseInt((data[g.id]&&data[g.id][fc])?data[g.id][fc]:"0",10)>0?BRAND.greenLight:"transparent",color:parseInt((data[g.id]&&data[g.id][fc])?data[g.id][fc]:"0",10)>0?BRAND.green:BRAND.textMuted,fontWeight:parseInt((data[g.id]&&data[g.id][fc])?data[g.id][fc]:"0",10)>0?600:400}}>{parseInt((data[g.id]&&data[g.id][fc])?data[g.id][fc]:"0",10)}</span>
-        )}</td>)}
-        <td style={{textAlign:"center",padding:"8px 10px"}}><Badge ok={rend} skipped={skipped}/></td>
-        {editable?<td style={{textAlign:"center",padding:"6px 8px"}}>
-          <button onClick={()=>onToggleSkip(g.id)} style={{background:"transparent",border:"0.5px solid "+BRAND.border,borderRadius:6,padding:"4px 8px",cursor:"pointer",color:skipped?BRAND.green:BRAND.textMuted,fontSize:12,display:"inline-flex",alignItems:"center",gap:4,fontFamily:"'Outfit',sans-serif"}}>
-            <i className={"ti "+(skipped?"ti-rotate-clockwise":"ti-ban")} style={{fontSize:13}}/>{skipped?"Herstel":"Vervallen"}
-          </button>
-        </td>:<td style={{textAlign:"center",padding:"8px 10px",fontWeight:600,color:BRAND.text}}>{skipped?"—":tot}</td>}
-      </tr>;
-    })}</tbody></table>
-  </div>;
-}
-
-function MonthGroupTable({data,groups}) {
-  return <div style={{overflowX:"auto",borderRadius:10,border:"0.5px solid "+BRAND.border}}>
-    <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}><thead><tr style={{background:BRAND.green}}>
-      {["Dag","Tijd","Collega","Actieve weken","Rendabele weken"].concat(FINANCE).concat(["Totaal patiënten"]).map((h,i)=>(
-        <th key={i} style={{textAlign:i>2?"center":"left",padding:"9px 10px",fontWeight:500,fontSize:12,color:"rgba(255,255,255,0.85)",whiteSpace:"nowrap"}}>{h}</th>
-      ))}
-    </tr></thead><tbody>{groups.map((g,i)=>{
-      const d=data[g.id],aw=d._activeWeeks||0,rw=d._rendWeeks||0;
-      const tot=FINANCE.reduce((s,fc)=>s+parseInt(d[fc]||"0",10),0);
-      const allR=aw>0&&rw===aw,noneR=rw===0;
-      return <tr key={g.id} style={{borderBottom:"0.5px solid "+BRAND.border,background:i%2===0?"#fff":BRAND.gray}}>
-        <td style={{padding:"9px 10px",fontWeight:500,color:BRAND.text}}>{g.day}</td>
-        <td style={{padding:"9px 10px",color:BRAND.textMuted}}>{g.time}</td>
-        <td style={{padding:"9px 10px",color:BRAND.text}}>{g.collega}</td>
-        <td style={{textAlign:"center",padding:"9px 10px"}}>{aw}</td>
-        <td style={{textAlign:"center",padding:"9px 10px"}}><span style={{fontWeight:500,color:allR?BRAND.success:(noneR&&aw>0)?BRAND.danger:BRAND.warn}}>{rw}/{aw}</span></td>
-        {FINANCE.map(fc=><td key={fc} style={{textAlign:"center",padding:"9px 8px"}}>
-          <span style={{display:"inline-block",minWidth:24,padding:"1px 7px",borderRadius:12,background:parseInt(d[fc]||"0",10)>0?BRAND.greenLight:"transparent",color:parseInt(d[fc]||"0",10)>0?BRAND.green:BRAND.textMuted,fontWeight:parseInt(d[fc]||"0",10)>0?600:400}}>{parseInt(d[fc]||"0",10)}</span>
-        </td>)}
-        <td style={{textAlign:"center",padding:"9px 10px",fontWeight:600,color:BRAND.text}}>{tot}</td>
-      </tr>;
-    })}</tbody></table>
-  </div>;
-}
-
-function App() {
-  const [tab,setTab]=useState("invoer");
-  const [weeks,setWeeks]=useState({});
-  const [loaded,setLoaded]=useState(false);
-  const [syncStatus,setSyncStatus]=useState("loading");
-  const [syncMsg,setSyncMsg]=useState("");
-  const [currentMonday,setCurrentMonday]=useState(getMondayStr(new Date()));
-  const [formData,setFormData]=useState(()=>emptyForm(DEFAULT_GROUPS));
-  const [savedOk,setSavedOk]=useState(false);
-  const [saving,setSaving]=useState(false);
-  const [historyWeek,setHistoryWeek]=useState("");
-  const [monthKey,setMonthKey]=useState(()=>new Date().toISOString().slice(0,7));
-
-  useEffect(()=>{ setSyncStatus("loading"); sbLoadWeeks().then(d=>{ setWeeks(d); setLoaded(true); setSyncStatus("ok"); const ks=Object.keys(d).sort().reverse(); if(ks.length){ setHistoryWeek(ks[0]); setMonthKey(ks[0].slice(0,7)); } }).catch(e=>{ setLoaded(true); setSyncStatus("error"); setSyncMsg(e.message); }); },[]);
-
-  useEffect(()=>{ if(!loaded)return; if(weeks[currentMonday]){ const s=weeks[currentMonday],m={}; DEFAULT_GROUPS.forEach(g=>{ m[g.id]=s[g.id]?s[g.id]:emptyFormRow(g.slots); if(m[g.id]._slots==null)m[g.id]._slots=g.slots; }); setFormData(m); }else{ setFormData(emptyForm(DEFAULT_GROUPS)); } setSavedOk(false); },[currentMonday,loaded]);
-
-  function setVal(gid,fc,v){ const n=v===""?"":String(Math.max(0,parseInt(v)||0)); setFormData(p=>{const nx={...p};nx[gid]={...p[gid]};nx[gid][fc]=n;return nx;}); setSavedOk(false); }
-  function toggleSkip(gid){ setFormData(p=>{const nx={...p},row={...p[gid]};row._skip=!row._skip;if(row._skip)FINANCE.forEach(fc=>{row[fc]="";}); nx[gid]=row;return nx;}); setSavedOk(false); }
-  function setSlots(gid,v){ const n=Math.max(1,Math.min(6,parseInt(v)||1)); setFormData(p=>{const nx={...p};nx[gid]={...p[gid]};nx[gid]._slots=n;return nx;}); setSavedOk(false); }
-
-  async function handleSave(){ setSaving(true);setSyncStatus("loading"); try{ await sbSaveWeek(currentMonday,formData); setWeeks(p=>({...p,[currentMonday]:formData})); setSavedOk(true);setSyncStatus("ok");setSyncMsg(""); if(!historyWeek||historyWeek<currentMonday)setHistoryWeek(currentMonday); }catch(e){ setSyncStatus("error");setSyncMsg(e.message); }finally{ setSaving(false); } }
-
-  const sortedWeekKeys=Object.keys(weeks).sort().reverse();
-
-  function getMonthData(mk){ const [y,m]=mk.split("-").map(Number),ms=new Date(y,m-1,1),me=new Date(y,m,0); const rel=sortedWeekKeys.filter(k=>{ const mon=new Date(k+"T00:00:00"),fri=new Date(mon);fri.setDate(mon.getDate()+4);return fri>=ms&&mon<=me; }); if(!rel.length)return null; const tot={}; DEFAULT_GROUPS.forEach(g=>{ const ft={};FINANCE.forEach(fc=>{ft[fc]=0;}); let aw=0,rw=0,ss=0; rel.forEach(wk=>{ const wd=weeks[wk]; if(!wd||!wd[g.id]||isSkipped(wd,g.id))return; const mon=new Date(wk+"T00:00:00"),gd=new Date(mon);gd.setDate(mon.getDate()+(GROUP_DAY_INDEX[g.id]||0)); if(gd<ms||gd>me)return; aw++;const slots=(wd[g.id]._slots!=null)?wd[g.id]._slots:g.slots;ss+=slots;FINANCE.forEach(fc=>{ft[fc]+=parseInt(wd[g.id][fc]||"0",10);}); if(parseInt(wd[g.id]["10007"]||"0",10)>=slots)rw++; }); tot[g.id]={_skip:false,_slots:aw>0?Math.round(ss/aw):g.slots,_activeWeeks:aw,_rendWeeks:rw,...ft}; }); return{totals:tot,weekCount:rel.length}; }
-
-  const monthData=getMonthData(monthKey);
-  const availableMonths=[...new Set(sortedWeekKeys.map(getMonthKey))].sort().reverse();
-  const mergedHistData=(historyWeek&&weeks[historyWeek])?(()=>{ const m={}; DEFAULT_GROUPS.forEach(g=>{ m[g.id]=weeks[historyWeek][g.id]?weeks[historyWeek][g.id]:emptyFormRow(g.slots); if(m[g.id]._slots==null)m[g.id]._slots=g.slots; }); return m; })():null;
-  const tabs=[{id:"invoer",label:"Invoer",icon:"ti-edit"},{id:"week",label:"Weekoverzicht",icon:"ti-chart-bar"},{id:"maand",label:"Maandoverzicht",icon:"ti-calendar"}];
-
-  return <div style={{fontFamily:"'Outfit',sans-serif"}}>
-    <SyncBar status={syncStatus} msg={syncMsg}/>
-    <div style={{background:BRAND.green,padding:"18px 24px 0",borderRadius:"12px 12px 0 0"}}>
-      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
-        <div style={{width:36,height:36,borderRadius:8,background:BRAND.orange,display:"flex",alignItems:"center",justifyContent:"center"}}>
-          <i className="ti ti-activity" style={{fontSize:20,color:"#fff"}}/>
+  return (
+    <div>
+      <MonthSelect/>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:"1.5rem"}}>
+        {[{label:"Opengestelde zittingen",value:totalSlots,sub:ag.length+" groepen",color:BRAND.greenMid},
+          {label:"Totaal patiënten",value:totalPats,sub:bezetting+"% bezetting",color:bezetting>=100?BRAND.success:bezetting>=75?BRAND.warn:BRAND.danger},
+          {label:"Totaal declarabel",value:totalDecl,sub:bezettingDecl+"% van zittingen",color:bezettingDecl>=100?BRAND.success:bezettingDecl>=75?BRAND.warn:BRAND.danger},
+        ].map(({label,value,sub,color})=>(
+          <div key={label} style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderRadius:12,padding:"16px 18px",borderTop:"3px solid "+color,textAlign:"center"}}>
+            <div style={{fontSize:36,fontWeight:700,color:BRAND.text,lineHeight:1}}>{value}</div>
+            <div style={{fontSize:12,color:BRAND.textMuted,margin:"4px 0 6px"}}>{label}</div>
+            <span style={{padding:"2px 10px",borderRadius:20,fontSize:11,fontWeight:500,background:color+"22",color}}>{sub}</span>
+          </div>
+        ))}
+      </div>
+      <div style={{fontSize:14,fontWeight:600,color:BRAND.text,marginBottom:12}}>Signalering — declarabiliteit per groep</div>
+      {!RED.length&&!ORG.length?(
+        <div style={{background:BRAND.successBg,border:"1px solid "+BRAND.success,borderRadius:10,padding:"14px 18px",fontSize:13,color:BRAND.success}}>✓ Alle groepen draaiden rendabel deze maand.</div>
+      ):[{title:"Aandacht — onder 75%",items:RED,bc:BRAND.danger},{title:"Let op — bijna rendabel (75–99%)",items:ORG,bc:BRAND.warn},{title:"Op orde — volledig rendabel",items:GRN,bc:BRAND.success}].filter(s=>s.items.length).map(({title,items,bc})=>(
+        <div key={title} style={{border:"1px solid "+bc,borderRadius:10,overflow:"hidden",marginBottom:12}}>
+          <div style={{background:bc,padding:"8px 14px",fontSize:13,fontWeight:600,color:"#fff",display:"flex",justifyContent:"space-between"}}>
+            <span>{title}</span><span style={{fontWeight:400,fontSize:12,opacity:0.8}}>{items.length} groep{items.length!==1?"en":""}</span>
+          </div>
+          {items.map(s=><SignalRow key={s.g.id} s={s}/>)}
         </div>
+      ))}
+    </div>
+  );
+}
+
+// ── MT TAB ────────────────────────────────────────────────────────────────
+function MTTab() {
+  const {weeks} = React.useContext(WeeksCtx);
+  const sortedWeekKeys=useMemo(()=>Object.keys(weeks).sort().reverse(),[weeks]);
+  const availableMonths=useMemo(()=>[...new Set(sortedWeekKeys.map(getMonthKey))].sort().reverse(),[sortedWeekKeys]);
+  const [mtMonth,setMtMonth] = useState(()=>{ const now=new Date(),y=now.getMonth()===0?now.getFullYear()-1:now.getFullYear(),m=now.getMonth()===0?12:now.getMonth(); return y+"-"+String(m).padStart(2,"0"); });
+  useEffect(()=>{ if(availableMonths.length&&!availableMonths.includes(mtMonth)) setMtMonth(availableMonths[0]); },[availableMonths]);
+
+  function getMonthData(mk) {
+    if(!mk) return null;
+    const p=mk.split("-"),y=Number(p[0]),m=Number(p[1]),monthStart=new Date(y,m-1,1),monthEnd=new Date(y,m,0);
+    const rel=sortedWeekKeys.filter(k=>{ const mon=new Date(k+"T00:00:00"),fri=new Date(mon); fri.setDate(mon.getDate()+4); return fri>=monthStart&&mon<=monthEnd; });
+    if(!rel.length) return null;
+    const tot={};
+    DEFAULT_GROUPS.forEach(g=>{
+      const fc={}; FINANCE.forEach(f=>{fc[f]=0;});
+      let aw=0,rw=0,ss=0;
+      rel.forEach(wk=>{ const wd=weeks[wk]; if(!wd||!wd[g.id]||isSkip(wd[g.id])) return; const mon=new Date(wk+"T00:00:00"),gd=new Date(mon); gd.setDate(mon.getDate()+(GROUP_DAY_INDEX[g.id]||0)); if(gd<monthStart||gd>monthEnd) return; aw++; const sl=getSlots(wd[g.id],g); ss+=sl; FINANCE.forEach(f=>{fc[f]+=getVal(wd[g.id],f);}); if(getVal(wd[g.id],"10007")>=sl) rw++; });
+      tot[g.id]={...fc,_slots:aw>0?Math.round(ss/aw):g.slots,_activeWeeks:aw,_rendWeeks:rw};
+    });
+    return {totals:tot,weekCount:rel.length};
+  }
+
+  const mtData=useMemo(()=>getMonthData(mtMonth),[mtMonth,weeks]);
+  const trendData=useMemo(()=>availableMonths.slice().reverse().map(mk=>{
+    const d=getMonthData(mk); if(!d) return null;
+    const ag=DEFAULT_GROUPS.filter(g=>d.totals[g.id]._activeWeeks>0);
+    const slots=ag.reduce((s,g)=>s+(d.totals[g.id]._slots||0)*(d.totals[g.id]._activeWeeks||0),0);
+    const pats=ag.reduce((s,g)=>FINANCE.reduce((ss,fc)=>ss+getVal(d.totals[g.id],fc),s),0);
+    const decl=ag.reduce((s,g)=>s+getVal(d.totals[g.id],"10007"),0);
+    const lbl=new Date(Number(mk.split("-")[0]),Number(mk.split("-")[1])-1,1).toLocaleDateString("nl-NL",{month:"short",year:"2-digit"});
+    return {mk,label:lbl,slots,pats,decl,pct:slots>0?Math.round((decl/slots)*100):0};
+  }).filter(Boolean),[availableMonths,weeks]);
+
+  if(!mtData) return <div style={{textAlign:"center",padding:"3rem",color:BRAND.textMuted,fontSize:13}}>Geen data beschikbaar. Sla eerst weken op via het Invoer-tabblad.</div>;
+
+  const ag=DEFAULT_GROUPS.filter(g=>mtData.totals[g.id]._activeWeeks>0);
+  const totalSlots=ag.reduce((s,g)=>s+(mtData.totals[g.id]._slots||0)*(mtData.totals[g.id]._activeWeeks||0),0);
+  const totalPats=ag.reduce((s,g)=>FINANCE.reduce((ss,fc)=>ss+getVal(mtData.totals[g.id],fc),s),0);
+  const totalDecl=ag.reduce((s,g)=>s+getVal(mtData.totals[g.id],"10007"),0);
+  const bezetting=totalSlots>0?Math.round((totalPats/totalSlots)*100):0;
+  const bezettingDecl=totalSlots>0?Math.round((totalDecl/totalSlots)*100):0;
+
+  const collegas=[...new Set(DEFAULT_GROUPS.map(g=>g.collega))];
+  const collegaStats=collegas.map(c=>{ const cg=DEFAULT_GROUPS.filter(g=>g.collega===c&&mtData.totals[g.id]._activeWeeks>0); if(!cg.length) return null; const slots=cg.reduce((s,g)=>s+(mtData.totals[g.id]._slots||0)*(mtData.totals[g.id]._activeWeeks||0),0); const decl=cg.reduce((s,g)=>s+getVal(mtData.totals[g.id],"10007"),0); return {c,slots,decl,pct:slots>0?Math.round((decl/slots)*100):0}; }).filter(Boolean).sort((a,b)=>b.pct-a.pct);
+  const groupRanking=ag.map(g=>{ const slots=(mtData.totals[g.id]._slots||0)*(mtData.totals[g.id]._activeWeeks||0); const decl=getVal(mtData.totals[g.id],"10007"); return {g,slots,decl,pct:slots>0?Math.round((decl/slots)*100):0}; }).sort((a,b)=>b.pct-a.pct);
+
+  function getGroupHistory(gid) {
+    return availableMonths.slice().reverse().map(mk=>{ const d=getMonthData(mk); if(!d||!d.totals[gid]||d.totals[gid]._activeWeeks===0) return null; const slots=(d.totals[gid]._slots||0)*(d.totals[gid]._activeWeeks||0); const decl=getVal(d.totals[gid],"10007"); const pct=slots>0?Math.round((decl/slots)*100):0; const lbl=new Date(Number(mk.split("-")[0]),Number(mk.split("-")[1])-1,1).toLocaleDateString("nl-NL",{month:"short",year:"2-digit"}); return {mk,label:lbl,slots,decl,pct,isCurrent:mk===mtMonth}; }).filter(Boolean);
+  }
+
+  function PctBar({pct}) {
+    const color=pct>=100?BRAND.success:pct>=75?BRAND.warn:BRAND.danger;
+    return <div style={{flex:1,height:8,background:"#e8e8e4",borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:Math.min(pct,100)+"%",background:color,borderRadius:4}}/></div>;
+  }
+  function TrendLine({data,valueKey,color}) {
+    if(data.length<2) return <div style={{fontSize:11,color:BRAND.textMuted,textAlign:"center",padding:"16px 0"}}>Min. 2 maanden nodig</div>;
+    const W=280,H=65,pad=8,vals=data.map(d=>d[valueKey]),mx=Math.max(...vals,1);
+    const pts=vals.map((v,i)=>[pad+(i/(data.length-1))*(W-pad*2),H-pad-(v/mx)*(H-pad*2)]);
+    const path=pts.map((p,i)=>(i===0?"M":"L")+p[0]+","+p[1]).join(" ");
+    const area="M"+pts[0][0]+","+H+" "+pts.map(p=>"L"+p[0]+","+p[1]).join(" ")+" L"+pts[pts.length-1][0]+","+H+" Z";
+    return <svg viewBox={"0 0 "+W+" "+H} style={{width:"100%",height:H}}>
+      <path d={area} fill={color} fillOpacity="0.12"/>
+      <path d={path} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round"/>
+      {pts.map(([x,y],i)=><g key={i}><circle cx={x} cy={y} r="3" fill={color}/><text x={x} y={H-1} textAnchor="middle" fontSize="8" fill={BRAND.textMuted}>{data[i].label}</text><text x={x} y={y-5} textAnchor="middle" fontSize="8.5" fontWeight="600" fill={color}>{vals[i]}</text></g>)}
+    </svg>;
+  }
+  function MiniTrendBar({history}) {
+    if(!history.length) return <span style={{fontSize:11,color:BRAND.textMuted}}>Geen historische data</span>;
+    const W=220,H=52,pad=6,barW=Math.max(8,Math.floor((W-pad*2)/history.length)-3);
+    return <svg viewBox={"0 0 "+W+" "+(H+14)} style={{width:"100%",maxWidth:W,display:"block"}}>
+      {history.map((hm,i)=>{ const bh=Math.max(2,Math.round((Math.min(hm.pct,120)/120)*(H-pad))),x=pad+i*((W-pad*2)/history.length),y2=H-bh,color=hm.pct>=100?BRAND.success:hm.pct>=75?BRAND.warn:BRAND.danger;
+        return <g key={hm.mk}><rect x={x} y={y2} width={barW} height={bh} rx="2" fill={color} opacity={hm.isCurrent?1:0.45}/><text x={x+barW/2} y={y2-2} textAnchor="middle" fontSize="8.5" fontWeight={hm.isCurrent?700:400} fill={color}>{hm.pct}%</text><text x={x+barW/2} y={H+12} textAnchor="middle" fontSize="8" fill={hm.isCurrent?BRAND.text:BRAND.textMuted} fontWeight={hm.isCurrent?600:400}>{hm.label}</text></g>;
+      })}
+      <line x1={pad} y1={H-Math.round((100/120)*(H-pad))} x2={W-pad} y2={H-Math.round((100/120)*(H-pad))} stroke={BRAND.success} strokeWidth="0.75" strokeDasharray="3,3" opacity="0.6"/>
+    </svg>;
+  }
+
+  const acties=groupRanking.filter(r=>r.pct<100);
+
+  // PDF generator (plain JS, geen JSX)
+  function handlePDF() {
+    const parts=mtMonth.split("-"),y=Number(parts[0]),m=Number(parts[1]);
+    const maandNaam=new Date(y,m-1,1).toLocaleDateString("nl-NL",{month:"long",year:"numeric"});
+    const printDate=new Date().toLocaleDateString("nl-NL",{day:"numeric",month:"long",year:"numeric"});
+    function statusBadge(pct){if(pct>=100)return'<span style="background:#e6f4ec;color:#1a7a4a;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:500">✓ Rendabel ('+pct+'%)</span>';if(pct>=75)return'<span style="background:#fef3e2;color:#b45309;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:500">⚠ Let op ('+pct+'%)</span>';return'<span style="background:#fdecea;color:#c0392b;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:500">✗ Aandacht ('+pct+'%)</span>';}
+    function miniBarSVG(history){const W=260,H=55,pad=6,barW=Math.max(10,Math.floor((W-pad*2)/history.length)-3);const bars=history.map(function(hm,i){const bh=Math.max(2,Math.round((Math.min(hm.pct,120)/120)*(H-pad))),x=pad+i*((W-pad*2)/history.length),y2=H-bh,color=hm.pct>=100?"#1a7a4a":hm.pct>=75?"#b45309":"#c0392b";return'<rect x="'+x+'" y="'+y2+'" width="'+barW+'" height="'+bh+'" rx="2" fill="'+color+'" opacity="'+(hm.isCurrent?1:0.45)+'"/><text x="'+(x+barW/2)+'" y="'+(y2-2)+'" text-anchor="middle" font-size="8" font-weight="'+(hm.isCurrent?700:400)+'" fill="'+color+'">'+hm.pct+'%</text><text x="'+(x+barW/2)+'" y="'+(H+11)+'" text-anchor="middle" font-size="8" fill="'+(hm.isCurrent?"#1a1a1a":"#6b6b65")+'" font-weight="'+(hm.isCurrent?600:400)+'">'+hm.label+'</text>';}).join("");const lineY=H-Math.round((100/120)*(H-pad));return'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+W+' '+(H+14)+'" width="'+W+'" height="'+(H+14)+'" style="display:block"><line x1="'+pad+'" y1="'+lineY+'" x2="'+(W-pad)+'" y2="'+lineY+'" stroke="#1a7a4a" stroke-width="0.75" stroke-dasharray="3,3" opacity="0.5"/>'+bars+'</svg>';}
+    const groupRows=groupRanking.map(function(item){return'<tr><td>'+item.g.day+'</td><td>'+item.g.time+'</td><td>'+item.g.collega+'</td><td style="text-align:center">'+item.slots+'</td><td style="text-align:center">'+item.decl+'</td><td style="text-align:center">'+statusBadge(item.pct)+'</td></tr>';}).join("");
+    const collegaRows=collegaStats.map(function(cs){return'<tr><td>'+cs.c+'</td><td style="text-align:center">'+cs.slots+'</td><td style="text-align:center">'+cs.decl+'</td><td style="text-align:center">'+statusBadge(cs.pct)+'</td></tr>';}).join("");
+    var actieHTML="";
+    if(acties.length===0){actieHTML='<div style="background:#e6f4ec;border:1px solid #1a7a4a;border-radius:8px;padding:12px 14px;color:#1a7a4a;font-size:12px">✓ Geen actiepunten — alle groepen waren rendabel deze maand.</div>';}
+    else{actieHTML=acties.map(function(item){const g=item.g,slots=item.slots,decl=item.decl,pct=item.pct,urgent=pct<75,tekort=slots-decl,history=getGroupHistory(g.id),notRendMonths=history.filter(function(h){return h.pct<100&&!h.isCurrent;}).length,structureel=notRendMonths>=2,incidenteel=notRendMonths===0&&history.length>1;var patroonTxt,patroonColor;if(structureel){patroonTxt="Structureel — al "+notRendMonths+" voorgaande maand"+(notRendMonths!==1?"en":"")+" niet rendabel";patroonColor="#c0392b";}else if(incidenteel){patroonTxt="Incidenteel — voorgaande maanden wél rendabel";patroonColor="#1a7a4a";}else if(history.length<=1){patroonTxt="Onvoldoende historische data";patroonColor="#b45309";}else{patroonTxt=notRendMonths+" voorgaande maand niet rendabel";patroonColor="#b45309";}const histRows=history.map(function(h){const pc=h.pct>=100?"#1a7a4a":h.pct>=75?"#b45309":"#c0392b";return'<tr style="'+(h.isCurrent?"font-weight:600":"")+'"><td>'+h.label+(h.isCurrent?" ◀":"")+'</td><td style="text-align:center">'+h.slots+'</td><td style="text-align:center">'+h.decl+'</td><td style="text-align:center;color:'+pc+'">'+h.pct+'%</td></tr>';}).join("");const blockBorder=urgent?"#c0392b":"#b45309",blockBg=urgent?"#fdecea":"#fef3e2";return'<div style="border:1px solid '+blockBorder+';border-radius:8px;padding:12px 14px;margin-bottom:12px;background:'+blockBg+';page-break-inside:avoid"><div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap"><div style="flex:1;min-width:180px"><div style="font-size:13px;font-weight:600;color:#1a1a1a">'+g.day+' '+g.time+' · '+g.collega+'</div><div style="color:#6b6b65;font-size:11px;margin:2px 0 6px">'+tekort+' zitting'+(tekort!==1?"en":"")+" onder grens · "+pct+'% declarabel</div><span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:10px;font-weight:500;background:'+patroonColor+'22;color:'+patroonColor+'">'+patroonTxt+'</span><table style="margin-top:8px;font-size:10px;width:100%;border-collapse:collapse"><thead><tr style="background:#1a4a3a;color:#fff"><th style="padding:4px 6px;text-align:left">Maand</th><th style="padding:4px 6px;text-align:center">Zittingen</th><th style="padding:4px 6px;text-align:center">Declarabel</th><th style="padding:4px 6px;text-align:center">%</th></tr></thead><tbody>'+histRows+'</tbody></table></div><div style="min-width:265px">'+miniBarSVG(history)+'</div></div></div>';}).join("");}
+    const kpiTop2=bezetting>=100?"#1a7a4a":bezetting>=75?"#b45309":"#c0392b",kpiTop3=bezettingDecl>=100?"#1a7a4a":bezettingDecl>=75?"#b45309":"#c0392b";
+    const html='<!DOCTYPE html><html lang="nl"><head><meta charset="UTF-8"><title>MT Rapport FyzioFit - '+maandNaam+'</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,Arial,sans-serif;color:#1a1a1a;font-size:12px;padding:28px 36px}h1{font-size:20px;font-weight:700;color:#1a4a3a}h2{font-size:13px;font-weight:600;color:#1a4a3a;margin:20px 0 8px;border-bottom:1.5px solid #1a4a3a;padding-bottom:4px}table{width:100%;border-collapse:collapse;font-size:11px;margin:8px 0}thead tr{background:#1a4a3a;color:#fff}th{padding:7px 8px;text-align:left;font-weight:500;font-size:11px}td{padding:6px 8px;border-bottom:0.5px solid #e0e0da}tr:nth-child(even) td{background:#f5f5f3}@media print{body{padding:12px 18px}}</style></head><body><div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #1a4a3a;padding-bottom:10px;margin-bottom:6px"><div><h1>FyzioFit Groepen — MT Rapport</h1><div style="color:#6b6b65;font-size:11px;margin-top:2px">Fyzio Totaal · Rendabiliteitsmonitor</div></div><div style="text-align:right"><div style="font-size:13px;font-weight:600;color:#1a4a3a">'+maandNaam+'</div><div style="color:#6b6b65;font-size:11px;margin-top:6px">Gegenereerd op '+printDate+'</div></div></div><h2>Samenvatting</h2><div style="display:flex;gap:12px;margin:12px 0"><div style="flex:1;border:1px solid #e0e0da;border-radius:8px;padding:12px 14px;text-align:center;border-top:3px solid #2a6b52"><div style="font-size:28px;font-weight:700">'+totalSlots+'</div><div style="font-size:10px;color:#6b6b65;margin:3px 0 5px">Opengestelde zittingen</div></div><div style="flex:1;border:1px solid #e0e0da;border-radius:8px;padding:12px 14px;text-align:center;border-top:3px solid '+kpiTop2+'"><div style="font-size:28px;font-weight:700">'+totalPats+'</div><div style="font-size:10px;color:#6b6b65;margin:3px 0 5px">Totaal patiënten</div><span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:500;background:'+kpiTop2+'22;color:'+kpiTop2+'">'+bezetting+'% bezetting</span></div><div style="flex:1;border:1px solid #e0e0da;border-radius:8px;padding:12px 14px;text-align:center;border-top:3px solid '+kpiTop3+'"><div style="font-size:28px;font-weight:700">'+totalDecl+'</div><div style="font-size:10px;color:#6b6b65;margin:3px 0 5px">Totaal declarabel</div><span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:500;background:'+kpiTop3+'22;color:'+kpiTop3+'">'+bezettingDecl+'% declarabel</span></div></div><h2>Overzicht alle groepen</h2><table><thead><tr><th>Dag</th><th>Tijd</th><th>Collega</th><th style="text-align:center">Zittingen</th><th style="text-align:center">Declarabel</th><th style="text-align:center">Status</th></tr></thead><tbody>'+groupRows+'</tbody></table><h2>Declarabiliteit per collega</h2><table><thead><tr><th>Collega</th><th style="text-align:center">Zittingen</th><th style="text-align:center">Declarabel</th><th style="text-align:center">%</th></tr></thead><tbody>'+collegaRows+'</tbody></table><h2>Actiepunten MT</h2>'+actieHTML+'<div style="margin-top:28px;padding-top:10px;border-top:1px solid #e0e0da;color:#6b6b65;font-size:10px;display:flex;justify-content:space-between"><span>FyzioFit Groepen · Fyzio Totaal</span><span>Rapport gegenereerd op '+printDate+' · '+maandNaam+'</span></div></body></html>';
+    const win=window.open("","_blank");
+    if(!win){alert("Sta pop-ups toe om het rapport te openen.");return;}
+    win.document.write(html); win.document.close();
+    setTimeout(function(){win.focus();win.print();},400);
+  }
+
+  return (
+    <div>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1.5rem",flexWrap:"wrap",gap:10}}>
         <div>
-          <div style={{fontSize:16,fontWeight:600,color:"#fff"}}>FyzioFit uren</div>
-          <div style={{fontSize:11,color:"rgba(255,255,255,0.6)"}}>Fyzio Totaal — Rendabiliteitsmonitor</div>
+          <div style={{fontSize:18,fontWeight:700,color:BRAND.green}}>MT Dashboard</div>
+          <div style={{fontSize:12,color:BRAND.textMuted}}>Maandrapportage Fyzio Totaal — FyzioFit groepen</div>
         </div>
-        <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:6,background:"rgba(255,255,255,0.12)",borderRadius:6,padding:"4px 10px",fontSize:11,color:"rgba(255,255,255,0.75)"}}>
-          <i className="ti ti-cloud" style={{fontSize:13}}/> Gedeelde opslag
-        </div>
-      </div>
-      <div style={{display:"flex",gap:2}}>
-        {tabs.map(t=><button key={t.id} onClick={()=>setTab(t.id)} style={{background:tab===t.id?"#fff":"transparent",border:"none",borderRadius:"8px 8px 0 0",padding:"8px 16px",fontSize:13,fontWeight:tab===t.id?500:400,color:tab===t.id?BRAND.green:"rgba(255,255,255,0.75)",cursor:"pointer",display:"flex",alignItems:"center",gap:6,transition:"all 0.15s",fontFamily:"'Outfit',sans-serif"}}>
-          <i className={"ti "+t.icon} style={{fontSize:14}}/>{t.label}
-        </button>)}
-      </div>
-    </div>
-
-    <div style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderTop:"none",borderRadius:"0 0 12px 12px",padding:"20px"}}>
-      {!loaded&&<div style={{textAlign:"center",padding:"3rem",color:BRAND.textMuted}}><i className="ti ti-loader-2 spin" style={{fontSize:32,display:"block",marginBottom:8}}/> Data laden…</div>}
-
-      {loaded&&tab==="invoer"&&<div>
-        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:"1.25rem",flexWrap:"wrap",background:BRAND.gray,borderRadius:8,padding:"10px 14px",border:"0.5px solid "+BRAND.border}}>
-          <i className="ti ti-calendar" style={{fontSize:16,color:BRAND.textMuted}}/><label style={{fontSize:13,color:BRAND.textMuted,fontWeight:500}}>Week van maandag</label>
-          <input type="date" value={currentMonday} onChange={e=>{setCurrentMonday(e.target.value);setSavedOk(false);}}/>
-          <span style={{fontSize:12,color:BRAND.textMuted}}>{formatWeekLabel(currentMonday)}</span>
-          {weeks[currentMonday]&&<Pill color={BRAND.green} bg={BRAND.greenLight}>Eerder opgeslagen</Pill>}
-        </div>
-        <div style={{marginBottom:"1rem",display:"flex",gap:12,flexWrap:"wrap",alignItems:"center"}}>
-          {FINANCE.map(fc=><span key={fc} style={{display:"flex",alignItems:"center",gap:5,fontSize:12,color:BRAND.textMuted}}><span style={{width:8,height:8,borderRadius:2,background:BRAND.green}}/>{fc} – {FINANCE_LABELS[fc]}</span>)}
-          <span style={{fontSize:12,color:BRAND.textMuted,marginLeft:"auto",display:"flex",alignItems:"center",gap:4}}><i className="ti ti-info-circle" style={{fontSize:12}}/>Pas zittingen aan bij vroeg starten</span>
-        </div>
-        <GroupTable data={formData} groups={DEFAULT_GROUPS} editable={true} onToggleSkip={toggleSkip} onSlotsChange={setSlots} onValChange={setVal}/>
-        <div style={{marginTop:"1rem",display:"flex",alignItems:"center",gap:12}}>
-          <button onClick={handleSave} disabled={saving} style={{background:BRAND.orange,color:"#fff",border:"none",borderRadius:8,padding:"9px 24px",fontSize:13,fontWeight:500,cursor:saving?"not-allowed":"pointer",display:"flex",alignItems:"center",gap:6,opacity:saving?0.7:1,fontFamily:"'Outfit',sans-serif"}}>
-            <i className={"ti "+(saving?"ti-loader-2 spin":"ti-device-floppy")} style={{fontSize:15}}/>{saving?"Opslaan…":"Opslaan"}
+        <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+          <select value={mtMonth} onChange={e=>setMtMonth(e.target.value)}>
+            {availableMonths.map(mk=>{const p=mk.split("-");return <option key={mk} value={mk}>{new Date(+p[0],+p[1]-1,1).toLocaleDateString("nl-NL",{month:"long",year:"numeric"})}</option>;})}
+          </select>
+          <button onClick={handlePDF} style={{background:BRAND.green,color:"#fff",border:"none",borderRadius:8,padding:"7px 16px",fontSize:13,fontWeight:500,cursor:"pointer",fontFamily:"'Outfit',sans-serif"}}>
+            📄 PDF rapport
           </button>
-          {savedOk&&<span style={{fontSize:13,color:BRAND.success,display:"flex",alignItems:"center",gap:4}}><i className="ti ti-cloud-check" style={{fontSize:15}}/>Opgeslagen en gesynchroniseerd</span>}
         </div>
-        <div style={{marginTop:"1.5rem"}}>
-          <div style={{fontSize:13,fontWeight:500,color:BRAND.textMuted,marginBottom:10,display:"flex",alignItems:"center",gap:6}}><i className="ti ti-users" style={{fontSize:14}}/>Overzicht per collega</div>
-          <CollegaCards data={formData} groups={DEFAULT_GROUPS}/>
-        </div>
-      </div>}
+      </div>
 
-      {loaded&&tab==="week"&&<div>
-        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:"1.25rem",flexWrap:"wrap",background:BRAND.gray,borderRadius:8,padding:"10px 14px",border:"0.5px solid "+BRAND.border}}>
-          <i className="ti ti-calendar" style={{fontSize:16,color:BRAND.textMuted}}/><label style={{fontSize:13,color:BRAND.textMuted,fontWeight:500}}>Kies week</label>
-          <select value={historyWeek} onChange={e=>setHistoryWeek(e.target.value)}>
-            {sortedWeekKeys.length===0&&<option value="">Nog geen weken opgeslagen</option>}
-            {sortedWeekKeys.map(k=><option key={k} value={k}>{formatWeekLabel(k)}</option>)}
-          </select>
-        </div>
-        {mergedHistData?<>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:12,marginBottom:"1.25rem"}}>
-            <MetricCard label="Totaal declarabel" value={totalDecl(mergedHistData,DEFAULT_GROUPS)} sub="patiënten (10007)"/>
-            <MetricCard label="Totaal gezien" value={totalAll(mergedHistData,DEFAULT_GROUPS)} sub="alle financieringstypen" accent={true}/>
-            <MetricCard label="Rendabele groepen" value={DEFAULT_GROUPS.filter(g=>!isSkipped(mergedHistData,g.id)&&isRendabel(g,mergedHistData)).length+"/"+DEFAULT_GROUPS.filter(g=>!isSkipped(mergedHistData,g.id)).length} sub="van actieve groepen"/>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:"1.5rem"}}>
+        {[{label:"Opengestelde zittingen",value:totalSlots,sub:ag.length+" groepen · "+mtData.weekCount+" wkn",color:BRAND.greenMid},
+          {label:"Totaal patiënten",value:totalPats,sub:bezetting+"% bezetting",color:bezetting>=100?BRAND.success:bezetting>=75?BRAND.warn:BRAND.danger},
+          {label:"Totaal declarabel",value:totalDecl,sub:bezettingDecl+"% van zittingen",color:bezettingDecl>=100?BRAND.success:bezettingDecl>=75?BRAND.warn:BRAND.danger},
+        ].map(({label,value,sub,color})=>(
+          <div key={label} style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderRadius:12,padding:"16px 18px",borderTop:"3px solid "+color,textAlign:"center"}}>
+            <div style={{fontSize:36,fontWeight:700,color:BRAND.text,lineHeight:1}}>{value}</div>
+            <div style={{fontSize:12,color:BRAND.textMuted,margin:"4px 0 6px"}}>{label}</div>
+            <span style={{padding:"2px 10px",borderRadius:20,fontSize:11,fontWeight:500,background:color+"22",color}}>{sub}</span>
           </div>
-          <GroupTable data={mergedHistData} groups={DEFAULT_GROUPS}/>
-          <div style={{marginTop:"1.5rem"}}><CollegaCards data={mergedHistData} groups={DEFAULT_GROUPS}/></div>
-        </>:<div style={{textAlign:"center",padding:"2rem",color:BRAND.textMuted,fontSize:13}}><i className="ti ti-mood-empty" style={{fontSize:32,display:"block",marginBottom:8}}/>Geen data voor deze week.</div>}
-      </div>}
+        ))}
+      </div>
 
-      {loaded&&tab==="maand"&&<div>
-        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:"1.25rem",flexWrap:"wrap",background:BRAND.gray,borderRadius:8,padding:"10px 14px",border:"0.5px solid "+BRAND.border}}>
-          <i className="ti ti-calendar-month" style={{fontSize:16,color:BRAND.textMuted}}/><label style={{fontSize:13,color:BRAND.textMuted,fontWeight:500}}>Kies maand</label>
-          <select value={monthKey} onChange={e=>setMonthKey(e.target.value)}>
-            {availableMonths.length===0&&<option value="">Nog geen data</option>}
-            {availableMonths.map(mk=>{const p=mk.split("-");const l=new Date(parseInt(p[0]),parseInt(p[1])-1,1).toLocaleDateString("nl-NL",{month:"long",year:"numeric"});return<option key={mk} value={mk}>{l}</option>;})}
-          </select>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:"1.5rem"}}>
+        <div style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderRadius:12,padding:"16px 18px"}}>
+          <div style={{fontSize:13,fontWeight:600,color:BRAND.text,marginBottom:14}}>Declarabiliteit per collega</div>
+          {collegaStats.map(({c,slots,decl,pct})=>{ const color=pct>=100?BRAND.success:pct>=75?BRAND.warn:BRAND.danger; return (
+            <div key={c} style={{marginBottom:10}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                <span style={{fontSize:13,fontWeight:500}}>{c}</span>
+                <span style={{fontSize:12,color:BRAND.textMuted}}>{decl}/{slots} <span style={{fontWeight:600,color}}>{pct}%</span></span>
+              </div>
+              <PctBar pct={pct}/>
+            </div>
+          );})}
         </div>
-        {monthData?<>
-          <div style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:BRAND.textMuted,marginBottom:"1rem",background:BRAND.orangeLight,borderRadius:6,padding:"7px 12px",border:"0.5px solid #f0c090"}}>
-            <i className="ti ti-info-circle" style={{fontSize:14}}/>Gebaseerd op {monthData.weekCount} {monthData.weekCount!==1?"weken":"week"} in deze maand
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:12,marginBottom:"1.25rem"}}>
-            <MetricCard label="Totaal declarabel" value={DEFAULT_GROUPS.reduce((s,g)=>s+parseInt(monthData.totals[g.id]["10007"]||"0",10),0)} sub="patiënten (10007)"/>
-            <MetricCard label="Totaal patiënten" value={DEFAULT_GROUPS.reduce((s,g)=>FINANCE.reduce((ss,fc)=>ss+parseInt(monthData.totals[g.id][fc]||"0",10),s),0)} sub="alle typen" accent={true}/>
-            <MetricCard label="Weken geregistreerd" value={monthData.weekCount} sub="in deze maand"/>
-          </div>
-          <MonthGroupTable data={monthData.totals} groups={DEFAULT_GROUPS}/>
-          <div style={{marginTop:"1.5rem"}}><CollegaCards data={monthData.totals} groups={DEFAULT_GROUPS}/></div>
-        </>:<div style={{textAlign:"center",padding:"2rem",color:BRAND.textMuted,fontSize:13}}><i className="ti ti-mood-empty" style={{fontSize:32,display:"block",marginBottom:8}}/>Geen data voor deze maand.</div>}
-      </div>}
+        <div style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderRadius:12,padding:"16px 18px"}}>
+          <div style={{fontSize:13,fontWeight:600,color:BRAND.text,marginBottom:14}}>Groepen — beste t/m slechtste</div>
+          {groupRanking.map(({g,slots,decl,pct},idx)=>{ const color=pct>=100?BRAND.success:pct>=75?BRAND.warn:BRAND.danger; const medal=idx===0?"🥇":idx===1?"🥈":idx===2?"🥉":""; return (
+            <div key={g.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:9}}>
+              <span style={{fontSize:13,minWidth:16,textAlign:"center"}}>{medal||<span style={{fontSize:11,color:BRAND.textMuted}}>{"#"+(idx+1)}</span>}</span>
+              <span style={{fontSize:12,minWidth:110}}>{g.day} {g.time}<span style={{color:BRAND.textMuted}}> · {g.collega}</span></span>
+              <PctBar pct={pct}/>
+              <span style={{fontSize:12,fontWeight:600,color,minWidth:38,textAlign:"right"}}>{pct}%</span>
+            </div>
+          );})}
+        </div>
+      </div>
 
-      <div style={{marginTop:"1.5rem",paddingTop:"1rem",borderTop:"0.5px solid "+BRAND.border,display:"flex",gap:16,flexWrap:"wrap",fontSize:11,color:BRAND.textMuted,alignItems:"center"}}>
-        <span style={{display:"flex",alignItems:"center",gap:5}}><span style={{width:8,height:8,borderRadius:"50%",background:BRAND.success}}/>Rendabel</span>
-        <span style={{display:"flex",alignItems:"center",gap:5}}><span style={{width:8,height:8,borderRadius:"50%",background:BRAND.danger}}/>Niet rendabel</span>
-        <span style={{display:"flex",alignItems:"center",gap:5}}><span style={{width:8,height:8,borderRadius:"50%",background:"#ccc"}}/>Vervallen</span>
-        <span style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:4}}><i className="ti ti-cloud-check" style={{fontSize:12}}/>Gedeelde Supabase-database</span>
+      <div style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderRadius:12,padding:"16px 18px",marginBottom:"1.5rem"}}>
+        <div style={{fontSize:13,fontWeight:600,color:BRAND.text,marginBottom:14}}>Trend — over tijd</div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16}}>
+          {[{key:"slots",label:"Zittingen",color:BRAND.greenMid},{key:"pats",label:"Patiënten",color:BRAND.orange},{key:"decl",label:"Declarabel",color:BRAND.success}].map(({key,label,color})=>(
+            <div key={key}>
+              <div style={{fontSize:11,color:BRAND.textMuted,fontWeight:500,marginBottom:6,textTransform:"uppercase",letterSpacing:"0.4px"}}>{label}</div>
+              <TrendLine data={trendData} valueKey={key} color={color}/>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderRadius:12,padding:"16px 18px"}}>
+        <div style={{fontSize:13,fontWeight:600,color:BRAND.text,marginBottom:14}}>Actiepunten voor het MT {acties.length>0&&"("+acties.length+")"}</div>
+        {acties.length===0?(
+          <div style={{background:BRAND.successBg,border:"1px solid "+BRAND.success,borderRadius:10,padding:"14px 18px",fontSize:13,color:BRAND.success}}>✓ Geen actiepunten — alle groepen waren rendabel.</div>
+        ):acties.map(({g,slots,decl,pct})=>{
+          const urgent=pct<75,tekort=slots-decl,history=getGroupHistory(g.id);
+          const notRendMonths=history.filter(h=>h.pct<100&&!h.isCurrent).length;
+          const structureel=notRendMonths>=2,incidenteel=notRendMonths===0&&history.length>1;
+          const patroonTxt=structureel?"Structureel — al "+notRendMonths+" voorgaande maand"+(notRendMonths!==1?"en":"")+" niet rendabel":incidenteel?"Incidenteel — voorgaande maanden wél rendabel":history.length<=1?"Onvoldoende historische data":notRendMonths+" voorgaande maand niet rendabel";
+          const patroonColor=structureel?BRAND.danger:incidenteel?BRAND.success:BRAND.warn;
+          return (
+            <div key={g.id} style={{padding:"12px 14px",borderRadius:10,background:urgent?BRAND.dangerBg:BRAND.warnBg,border:"0.5px solid "+(urgent?BRAND.danger:BRAND.warn),marginBottom:12}}>
+              <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+                <div style={{flex:1,minWidth:180}}>
+                  <div style={{fontSize:13,fontWeight:600,color:BRAND.text}}>{g.day} {g.time} · {g.collega}</div>
+                  <div style={{fontSize:12,color:BRAND.textMuted,margin:"2px 0 6px"}}>{pct}% declarabel — {tekort} zitting{tekort!==1?"en":""} onder grens</div>
+                  <span style={{display:"inline-flex",alignItems:"center",gap:5,padding:"3px 10px",borderRadius:20,fontSize:11,fontWeight:500,background:patroonColor+"18",color:patroonColor,border:"0.5px solid "+patroonColor+"44"}}>
+                    <span style={{width:6,height:6,borderRadius:"50%",background:patroonColor,flexShrink:0}}/>{patroonTxt}
+                  </span>
+                  <div style={{marginTop:10,fontSize:11,color:BRAND.textMuted,fontWeight:500,marginBottom:4}}>Maandhistorie</div>
+                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                    <thead><tr style={{background:BRAND.green}}>{["Maand","Zittingen","Declarabel","%"].map((h,i)=><th key={i} style={{padding:"5px 7px",textAlign:i===0?"left":"center",fontWeight:500,fontSize:10,color:"rgba(255,255,255,0.85)"}}>{h}</th>)}</tr></thead>
+                    <tbody>{history.map((hm)=>{ const pc=hm.pct>=100?BRAND.success:hm.pct>=75?BRAND.warn:BRAND.danger; return <tr key={hm.mk} style={{borderBottom:"0.5px solid "+BRAND.border,background:hm.isCurrent?BRAND.gray:"#fff",fontWeight:hm.isCurrent?600:400}}><td style={{padding:"5px 7px"}}>{hm.label}{hm.isCurrent?" ◀":""}</td><td style={{padding:"5px 7px",textAlign:"center"}}>{hm.slots}</td><td style={{padding:"5px 7px",textAlign:"center"}}>{hm.decl}</td><td style={{padding:"5px 7px",textAlign:"center",color:pc,fontWeight:600}}>{hm.pct}%</td></tr>; })}</tbody>
+                  </table>
+                </div>
+                <div style={{minWidth:230,flex:"0 0 auto"}}>
+                  <div style={{fontSize:10,color:BRAND.textMuted,marginBottom:4,fontWeight:500,textTransform:"uppercase",letterSpacing:"0.4px"}}>Declarabiliteit per maand</div>
+                  <MiniTrendBar history={history}/>
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
-  </div>;
+  );
+}
+
+// ── ROOT APP ──────────────────────────────────────────────────────────────
+function App() {
+  const [tab,setTab] = useState("invoer");
+  const [formData,setFormData] = useState(emptyForm);
+  const [weeks,setWeeks] = useState({});
+  const [syncStatus,setSyncStatus] = useState("loading");
+  const [syncMsg,setSyncMsg] = useState("");
+
+  async function reload() {
+    setSyncStatus("loading");
+    try {
+      const d = await loadAll();
+      setWeeks(d);
+      setSyncStatus("ok"); setSyncMsg("");
+    } catch(e) {
+      setSyncStatus("error"); setSyncMsg(e.message);
+    }
+  }
+  useEffect(()=>{ reload(); },[]);
+
+  const ctxValue = useMemo(()=>({weeks,reload,syncStatus,syncMsg}),[weeks,syncStatus,syncMsg]);
+  const tabs=[{id:"invoer",label:"Invoer"},{id:"week",label:"Weekoverzicht"},{id:"maand",label:"Maandoverzicht"},{id:"mt",label:"MT Dashboard"}];
+
+  return (
+    <WeeksCtx.Provider value={ctxValue}>
+      <div style={{fontFamily:"'Outfit',sans-serif"}}>
+        <div style={{background:BRAND.green,padding:"18px 24px 0",borderRadius:"12px 12px 0 0"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+            <div style={{width:36,height:36,borderRadius:8,background:BRAND.orange,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20}}>💪</div>
+            <div>
+              <div style={{fontSize:16,fontWeight:600,color:"#fff"}}>FyzioFit uren</div>
+              <div style={{fontSize:11,color:"rgba(255,255,255,0.6)"}}>Fyzio Totaal — Rendabiliteitsmonitor</div>
+            </div>
+            <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:6,background:"rgba(255,255,255,0.12)",borderRadius:6,padding:"4px 10px",fontSize:11,color:"rgba(255,255,255,0.75)"}}>
+              ☁ Gedeelde opslag
+            </div>
+          </div>
+          <div style={{display:"flex",gap:2}}>
+            {tabs.map(t=>(
+              <button key={t.id} onClick={()=>setTab(t.id)} style={{background:tab===t.id?"#fff":"transparent",border:"none",borderRadius:"8px 8px 0 0",padding:"8px 16px",fontSize:13,fontWeight:tab===t.id?500:400,color:tab===t.id?BRAND.green:"rgba(255,255,255,0.75)",cursor:"pointer",fontFamily:"'Outfit',sans-serif"}}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderTop:"none",borderRadius:"0 0 12px 12px",padding:"20px"}}>
+          {syncStatus==="loading"&&!Object.keys(weeks).length
+            ?<div style={{textAlign:"center",padding:"3rem",color:BRAND.textMuted}}>Data laden uit gedeelde database…</div>
+            :<>
+              {tab==="invoer"&&<InvoerTab formData={formData} setFormData={setFormData}/>}
+              {tab==="week"&&<WeekTab/>}
+              {tab==="maand"&&<MaandTab/>}
+              {tab==="mt"&&<MTTab/>}
+            </>
+          }
+          <div style={{marginTop:"1.5rem",paddingTop:"1rem",borderTop:"0.5px solid "+BRAND.border,display:"flex",justifyContent:"flex-end",fontSize:11,color:BRAND.textMuted,alignItems:"center",gap:6}}>
+            ☁ Gegevens worden opgeslagen in gedeelde Supabase-database
+          </div>
+        </div>
+      </div>
+    </WeeksCtx.Provider>
+  );
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
