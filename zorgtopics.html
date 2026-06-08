@@ -396,12 +396,16 @@ function getLabel(key){
 }
 
 function buildNavItems(){
-  const avail=Object.keys(DATA).map(Number).sort((a,b)=>a-b);
+  // Filter alleen numerieke maandsleutels (geen 'Q1' etc.)
+  const avail=Object.keys(DATA).map(Number).filter(n=>!isNaN(n)).sort((a,b)=>a-b);
   const qg={};avail.forEach(m=>{const q=MONTHS[m].q;if(!qg[q])qg[q]=[];qg[q].push(m);});
   const items=[];
-  Object.keys(qg).map(Number).sort((a,b)=>b-a).forEach(q=>{
+  Object.keys(qg).map(Number).filter(n=>!isNaN(n)).sort((a,b)=>b-a).forEach(q=>{
     qg[q].sort((a,b)=>b-a).forEach(m=>items.push({type:'month',m}));
-    items.push({type:'q',q});
+    // Kwartaal alleen tonen als alle 3 maanden data hebben
+    const allMonths=[1,2,3].map(i=>q*3-3+i);
+    const hasQ=DATA['Q'+q]&&DATA['Q'+q].length>0;
+    if(hasQ)items.push({type:'q',q});
   });
   return items;
 }
@@ -860,20 +864,87 @@ function parseZorgTopicsExcel(arrayBuffer) {
 
 // ── BEHEER RENDER ────────────────────────────────────────────────────────────
 let beheerState = {
-  preview: null,     // { jaar, maand, rows: [{topic, vals}] }
+  preview: null,
   saving: false,
   savedMsg: '',
   uploadErr: '',
   sheetJSLoaded: false,
-  // MV invoer state: { cur: {m: {topic: val}}, prev: {m: {topic: val}} }
+  uploadLog: {},   // { "2026_4": { topics: ['lage rug','nek','schouder'], ts: '...' }, ... }
 };
+
+// Laad uploadlog uit Supabase
+async function loadUploadLog() {
+  try {
+    const r = await fetch(`${SB_URL}/zorgtopics_data?select=id,jaar,maand,topic,updated_at&order=updated_at.desc`, { headers: SB_HDR });
+    if (!r.ok) return;
+    const rows = await r.json();
+    const log = {};
+    rows.forEach(row => {
+      if (String(row.maand).startsWith('Q')) return; // kwartalen overslaan
+      const key = row.jaar + '_' + row.maand;
+      if (!log[key]) log[key] = { jaar: row.jaar, maand: parseInt(row.maand), topics: [], ts: row.updated_at };
+      log[key].topics.push(row.topic);
+      if (row.updated_at > log[key].ts) log[key].ts = row.updated_at;
+    });
+    beheerState.uploadLog = log;
+    renderBeheer();
+  } catch(e) { console.warn('uploadlog laden:', e); }
+}
 
 function renderBeheer() {
   const c = document.getElementById('beheer-content');
   if (!c) return;
+  // Laad uploadlog de eerste keer
+  if (Object.keys(beheerState.uploadLog).length === 0 && !beheerState._logLoading) {
+    beheerState._logLoading = true;
+    loadUploadLog();
+  }
 
   const s = beheerState;
   const maandNamen = Object.fromEntries(Object.entries(MONTHS).map(([k,v])=>[k,v.label]));
+
+  // ── SECTIE 0: Uploadstatus ───────────────────────────────────────────────
+  const log = s.uploadLog || {};
+  const logEntries = Object.values(log).sort((a,b) => b.jaar - a.jaar || b.maand - a.maand);
+  let statusHTML = '';
+  if (logEntries.length > 0) {
+    const rows = logEntries.map(e => {
+      const mNaam = maandNamen[e.maand] || e.maand;
+      const allTopics = e.topics.length >= 3;
+      const ts = new Date(e.ts).toLocaleDateString('nl-NL', {day:'numeric',month:'long',year:'numeric'});
+      return `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:8px 10px;font-weight:500">${mNaam} ${e.jaar}</td>
+        <td style="padding:8px 10px">
+          ${['lage rug','nek','schouder'].map(t =>
+            `<span style="display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;margin-right:3px;
+              background:${e.topics.includes(t)?'#e6f4ec':'var(--surface2)'};
+              color:${e.topics.includes(t)?'#1a7a4a':'var(--text3)'}">
+              ${e.topics.includes(t)?'✓':'–'} ${t}</span>`
+          ).join('')}
+        </td>
+        <td style="padding:8px 10px;font-size:11px;color:var(--text3)">${ts}</td>
+        <td style="padding:8px 10px">
+          <span style="font-size:11px;color:var(--text2);cursor:pointer;text-decoration:underline"
+            onclick="prefillUpload(${e.jaar},${e.maand})">Vervangen</span>
+        </td>
+      </tr>`;
+    }).join('');
+    statusHTML = `
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:20px;margin-bottom:20px;box-shadow:var(--sh)">
+        <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:14px">✅ Geüploade maanden</div>
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead><tr style="background:var(--surface2)">
+              <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);font-weight:500;color:var(--text2)">Periode</th>
+              <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);font-weight:500;color:var(--text2)">Bestanden</th>
+              <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);font-weight:500;color:var(--text2)">Laatste update</th>
+              <th style="padding:8px 10px;border-bottom:1px solid var(--border)"></th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>`;
+  }
 
   // ── SECTIE 1: Excel upload ──────────────────────────────────────────────
   let uploadHTML = `
@@ -970,7 +1041,7 @@ function renderBeheer() {
   // ── SECTIE 2: MV invoer ──────────────────────────────────────────────────
   const mvHtml = buildMVInvoer();
 
-  c.innerHTML = uploadHTML + previewHTML + mvHtml;
+  c.innerHTML = statusHTML + uploadHTML + previewHTML + mvHtml;
 }
 
 function buildMVInvoer() {
@@ -1054,6 +1125,13 @@ function buildMVInvoer() {
 
 // ── BESTAND SELECTIE EN VERWERKING ──────────────────────────────────────────
 const selectedFiles = { 'lage rug': null, 'nek': null, 'schouder': null };
+
+function prefillUpload(jaar, maand) {
+  // Scroll naar upload sectie en selecteer jaar/maand
+  document.getElementById('bh-jaar').value = String(jaar);
+  document.getElementById('bh-maand').value = String(maand);
+  document.getElementById('bh-jaar').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
 
 function handleFileSelect(input, topic) {
   const file = input.files[0];
@@ -1152,8 +1230,8 @@ async function slaDataOp() {
 
     beheerState.saving = false;
     beheerState.savedMsg = '✓ Opgeslagen! ' + (MONTHS[maand]?.label || maand) + ' ' + jaar + ' is nu zichtbaar in het dashboard.';
-    // Reset geselecteerde bestanden
     TOPICS.forEach(t => { selectedFiles[t] = null; });
+    loadUploadLog(); // ververs de uploadstatus
     renderBeheer();
   } catch(e) {
     beheerState.saving = false;
