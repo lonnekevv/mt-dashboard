@@ -189,7 +189,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);fon
   <div class="tab-pane active" id="tab-data">
     <div class="header">
       <div class="header-top">
-        <div><h1>Inclusie-overzicht 2026</h1><div class="header-sub">Lage rug · Nek · Schouder</div></div>
+        <div><h1>Inclusie-overzicht <span id="header-jaar"></span></h1><div class="header-sub">Lage rug · Nek · Schouder</div></div>
         <div class="logo-mark">ZORGTOPICS</div>
       </div>
     </div>
@@ -200,10 +200,13 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);fon
     <div class="sec-label">Risicoverdeling productfinanciering</div>
     <div class="risk-wrap" id="risk-wrap"></div>
     <div class="divider"></div>
-    <div class="sec-label">Trends — inclusiepercentages 2026</div>
+    <div class="sec-label">Trends — inclusiepercentages <span id="trends-jaar"></span></div>
     <div class="chart-full" id="chart-zp-wrap"></div>
     <div class="chart-grid" id="chart-pf-wrap"></div>
-    <div class="footer">ZorgTopics inclusie-overzicht 2026 — Fyzio Totaal MT</div>
+    <div class="divider"></div>
+    <div class="sec-label">Meerjarentrend — inclusiepercentages per jaar</div>
+    <div id="chart-multiyear-wrap"></div>
+    <div class="footer">ZorgTopics inclusie-overzicht <span id="footer-jaar"></span> — Fyzio Totaal MT</div>
   </div>
 
   <div class="tab-pane" id="tab-mt">
@@ -425,7 +428,6 @@ function buildNavItems(){
 }
 
 let curKey=4,curMTKey=4,mainTab='data',riskTab='2026';
-let czp=null,cpf=null,cmv=null;
 const cardView={};
 
 function switchMainTab(tab){
@@ -618,27 +620,39 @@ function legH(){
     `<span class="cl"><span style="display:inline-block;width:14px;height:0;border-top:2px dashed var(--target);vertical-align:middle;margin-right:2px"></span><span style="color:var(--target)">80%</span></span>`;
 }
 
+let czp=null,cpf=null,cmv=null,cmulti=null;
+
 function renderCharts(){
-  const avail=Object.keys(DATA).map(Number).filter(n=>!isNaN(n)).sort((a,b)=>a-b),labels=avail.map(m=>MONTHS[m].short);
+  const curYear = new Date().getFullYear();
+
+  // Jaar labels dynamisch updaten
+  ['trends-jaar','header-jaar','footer-jaar'].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.textContent=curYear;
+  });
+
+  // Alleen maanden van het huidige jaar
+  const avail=Object.keys(DATA).map(Number).filter(n=>!isNaN(n)).sort((a,b)=>a-b);
+  const labels=avail.map(m=>MONTHS[m].short);
+
   const makeDS=g=>TOPICS.map((t,i)=>({label:cap(t),data:avail.map(m=>{const f=DATA[m]?.find(d=>d.topic===t);return f?parseFloat((g(f)*100).toFixed(1)):null;}),borderColor:PAL[i],backgroundColor:'transparent',borderWidth:2,pointRadius:4,pointBackgroundColor:PAL[i],tension:.3,spanGaps:true,borderDash:DASHES[i]}));
   const mvDS=TOPICS.map((t,i)=>({label:cap(t),data:avail.map(m=>{const f=DATA[m]?.find(d=>d.topic===t);const mv=getMV('cur',m,t);if(!f||mv==null||mv<=0)return null;return parseFloat((f.pf/mv*100).toFixed(1));}),borderColor:PAL[i],backgroundColor:'transparent',borderWidth:2,pointRadius:4,pointBackgroundColor:PAL[i],tension:.3,spanGaps:true,borderDash:DASHES[i]}));
   const hasMV=mvDS.some(d=>d.data.some(v=>v!=null));
 
   document.getElementById('chart-zp-wrap').innerHTML=`
     <div class="chart-card">
-      <div class="chart-title">Inclusiepercentage zorgplan</div>
+      <div class="chart-title">Inclusiepercentage zorgplan — ${curYear}</div>
       <div class="chart-legend">${legH()}</div>
       <div class="chart-wrap-lg"><canvas id="czp"></canvas></div>
     </div>`;
 
   document.getElementById('chart-pf-wrap').innerHTML=`
     <div class="chart-card">
-      <div class="chart-title">Inclusiepercentage productfinanciering (totaal)</div>
+      <div class="chart-title">Inclusiepercentage productfinanciering — ${curYear}</div>
       <div class="chart-legend">${legH()}</div>
       <div class="chart-wrap"><canvas id="cpf"></canvas></div>
     </div>
     ${hasMV?`<div class="chart-card">
-      <div class="chart-title">Incl. % PF gecorrigeerd voor verzekeraar</div>
+      <div class="chart-title">Incl. % PF gecorrigeerd — ${curYear}</div>
       <div class="chart-legend">${legH()}</div>
       <div class="chart-wrap"><canvas id="cmv"></canvas></div>
     </div>`:`<div class="chart-card" style="display:flex;align-items:center;justify-content:center;color:var(--text3)">
@@ -650,6 +664,128 @@ function renderCharts(){
   czp=new Chart(document.getElementById('czp'),{type:'line',data:{labels,datasets:makeDS(f=>f.totaal?f.zorgplan/f.totaal:0)},options:chartOpts()});
   cpf=new Chart(document.getElementById('cpf'),{type:'line',data:{labels,datasets:makeDS(f=>f.csi?f.pf/f.csi:0)},options:chartOpts()});
   if(hasMV&&document.getElementById('cmv'))cmv=new Chart(document.getElementById('cmv'),{type:'line',data:{labels,datasets:mvDS},options:chartOpts()});
+
+  // Meerjarentrendgrafiek
+  renderMultiYearChart();
+}
+
+function renderMultiYearChart(){
+  const wrap = document.getElementById('chart-multiyear-wrap');
+  if(!wrap) return;
+
+  const curYear = new Date().getFullYear();
+  const qLabels = ['Q1','Q2','Q3','Q4'];
+  const jarenData = [
+    { jaar: curYear - 1, src: DATA_PREV, yr: 'prev' },
+    { jaar: curYear,     src: DATA,      yr: 'cur'  },
+  ];
+
+  const hasMultiYear = jarenData.some(jd => Object.keys(jd.src).filter(k=>!isNaN(Number(k))).length > 0);
+  if(!hasMultiYear){ wrap.innerHTML=''; return; }
+
+  // Twee grafieken: zorgplan% en gecorrigeerd PF% — beide per topic (kleur) en per jaar (lijn stijl)
+  // Huidig jaar = doorgetrokken, vorig jaar = stippel
+  // Kleuren = PAL: blauw, groen, oranje (zelfde als andere grafieken)
+
+  function makeTopicDatasets(metricFn) {
+    const datasets = [];
+    TOPICS.forEach((topic, ti) => {
+      jarenData.forEach((jd, ji) => {
+        const hasData = Object.keys(jd.src).filter(k=>!isNaN(Number(k))).length > 0;
+        if(!hasData) return;
+        const data = qLabels.map(q => {
+          const rows = getRows(q, jd.src);
+          const row = rows.find(r => r.topic === topic);
+          if(!row) return null;
+          return metricFn(row, jd.yr, q);
+        });
+        if(data.every(v=>v===null)) return;
+        const isCur = ji === jarenData.length - 1;
+        datasets.push({
+          label: cap(topic) + ' ' + jd.jaar,
+          data,
+          borderColor: PAL[ti],
+          backgroundColor: 'transparent',
+          borderWidth: isCur ? 2.5 : 1.5,
+          pointRadius: isCur ? 4 : 3,
+          pointBackgroundColor: PAL[ti],
+          pointStyle: isCur ? 'circle' : 'triangle',
+          tension: .3,
+          spanGaps: true,
+          borderDash: isCur ? [] : [5, 3],
+          opacity: isCur ? 1 : 0.6,
+        });
+      });
+    });
+    return datasets;
+  }
+
+  // Zorgplan%
+  const zpDatasets = makeTopicDatasets((row) =>
+    row.totaal > 0 ? parseFloat((row.zorgplan/row.totaal*100).toFixed(1)) : null
+  );
+
+  // Gecorrigeerd PF% (PF / MV als MV beschikbaar, anders null)
+  const pfCorrDatasets = makeTopicDatasets((row, yr, q) => {
+    const mv = getMV(yr, q, row.topic);
+    if(mv == null || mv <= 0) return null;
+    return parseFloat((row.pf / mv * 100).toFixed(1));
+  });
+  const hasPFCorr = pfCorrDatasets.some(d => d.data.some(v=>v!=null));
+
+  // Legenda: topics met kleur + jaar met lijnstijl
+  const topicLeg = TOPICS.map((t,i) =>
+    `<span class="cl"><span class="cl-sq" style="background:${PAL[i]}"></span>${cap(t)}</span>`
+  ).join('');
+  const jaarLeg = jarenData
+    .filter(jd => Object.keys(jd.src).filter(k=>!isNaN(Number(k))).length > 0)
+    .map((jd, ji) => {
+      const isCur = ji === jarenData.length - 1;
+      return isCur
+        ? `<span class="cl"><span class="cl-sq" style="background:#888"></span>${jd.jaar} (huidig)</span>`
+        : `<span class="cl"><span style="display:inline-block;width:14px;height:0;border-top:2px dashed #888;vertical-align:middle;margin-right:2px"></span>${jd.jaar}</span>`;
+    }).join('');
+  const targetLeg = `<span class="cl"><span style="display:inline-block;width:14px;height:0;border-top:2px dashed var(--target);vertical-align:middle;margin-right:2px"></span><span style="color:var(--target)">80%</span></span>`;
+
+  const chartOp = {
+    responsive:true, maintainAspectRatio:false,
+    plugins:{
+      legend:{ display:false },
+      tooltip:{ callbacks:{ label:c=>c.dataset.label+': '+c.parsed.y+'%' } },
+      tl:{}
+    },
+    scales:{
+      y:{ min:0, max:100, ticks:{ callback:v=>v+'%', font:{size:10}, color:'#9E9B94' }, grid:{ color:'rgba(0,0,0,.05)' }, border:{ display:false } },
+      x:{ ticks:{ font:{size:10}, color:'#9E9B94' }, grid:{ display:false }, border:{ display:false } }
+    }
+  };
+
+  wrap.innerHTML=`
+    <div class="chart-grid" style="margin-bottom:14px">
+      <div class="chart-card">
+        <div class="chart-title">Zorgplan% per kwartaal — meerjarentrend</div>
+        <div class="chart-legend" style="flex-wrap:wrap">${topicLeg} ${jaarLeg} ${targetLeg}</div>
+        <div class="chart-wrap"><canvas id="cmulti-zp"></canvas></div>
+      </div>
+      ${hasPFCorr ? `<div class="chart-card">
+        <div class="chart-title">PF% gecorrigeerd per kwartaal — meerjarentrend</div>
+        <div class="chart-legend" style="flex-wrap:wrap">${topicLeg} ${jaarLeg} ${targetLeg}</div>
+        <div class="chart-wrap"><canvas id="cmulti-pf"></canvas></div>
+      </div>` : `<div class="chart-card" style="display:flex;align-items:center;justify-content:center;color:var(--text3)">
+        <div style="text-align:center"><div style="font-size:22px;margin-bottom:8px">📊</div>
+        <div style="font-size:12px">Vul Menzis+VGZ-aantallen in<br>om gecorrigeerd PF% te zien</div></div>
+      </div>`}
+    </div>`;
+
+  if(cmulti) cmulti.destroy();
+  cmulti = new Chart(document.getElementById('cmulti-zp'), {
+    type:'line', data:{ labels:qLabels, datasets:zpDatasets }, options:chartOp
+  });
+  if(hasPFCorr && document.getElementById('cmulti-pf')) {
+    const cmultiPF = new Chart(document.getElementById('cmulti-pf'), {
+      type:'line', data:{ labels:qLabels, datasets:pfCorrDatasets }, options:chartOp
+    });
+  }
 }
 
 function renderMT(){
@@ -662,7 +798,7 @@ function renderMT(){
   const prevMNum=curMNum!=null?avail[avail.indexOf(curMNum)-1]:null;
   const prevMRows=prevMNum!=null?getRows(prevMNum):null;
   const t=totals(rows),p=hasPrev?totals(prevRows):null;
-  const periodLabel=getLabel(key)+' 2026';
+  const periodLabel=getLabel(key)+' '+new Date().getFullYear();
 
   function zpCard(f,pr,pm){
     const pzp=f.totaal?f.zorgplan/f.totaal:0;
