@@ -236,13 +236,13 @@ async function loadMVFromSupabase() {
   document.getElementById('sb-icon').textContent = '⏳';
   document.getElementById('sb-msg').textContent = 'Data laden…';
   try {
-    const r = await fetch(`${SB_URL}/${MV_TABLE}?select=id,yr,key,topic,value`, { headers: SB_HDR });
+    const r = await fetch(`${SB_URL}/${MV_TABLE}?select=id,yr,period,topic,waarde`, { headers: SB_HDR });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const rows = await r.json();
     // Reset runtime mvData to baked values, then overlay with Supabase
     mvData = { cur: JSON.parse(JSON.stringify(MV_DATA_BAKED.cur || {})), prev: JSON.parse(JSON.stringify(MV_DATA_BAKED.prev || {})) };
     rows.forEach(row => {
-      const yr = row.yr, k = String(row.key), topic = row.topic, val = row.value;
+      const yr = row.yr, k = String(row.period), topic = row.topic, val = row.waarde;
       if (!mvData[yr]) mvData[yr] = {};
       if (!mvData[yr][k]) mvData[yr][k] = {};
       mvData[yr][k][topic] = val;
@@ -259,12 +259,12 @@ async function loadMVFromSupabase() {
 }
 
 async function saveMVToSupabase(yr, key, topic, value) {
-  const id = yr + '_' + String(key) + '_' + topic;
+  const id = yr + '|' + String(key) + '|' + topic;
   try {
     await fetch(`${SB_URL}/${MV_TABLE}`, {
       method: 'POST',
       headers: { ...SB_HDR, 'Prefer': 'resolution=merge-duplicates' },
-      body: JSON.stringify({ id, yr, key: String(key), topic, value: value === null ? null : parseInt(value), updated_at: new Date().toISOString() })
+      body: JSON.stringify({ id, yr, period: String(key), topic, waarde: value === null ? null : parseInt(value), updated_at: new Date().toISOString() })
     });
   } catch(e) {
     console.warn('MV opslaan mislukt:', e);
