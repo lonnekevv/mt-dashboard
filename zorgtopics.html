@@ -1298,7 +1298,7 @@ function buildMVInvoer() {
         Vul het aantal trajecten in dat Menzis of VGZ heeft gefactureerd. Wordt automatisch opgeslagen en gedeeld.
       </div>
       ${jarenSections}
-      <div style="margin-top:4px;font-size:11px;color:var(--text3)">Wijzigingen worden direct opgeslagen via Supabase · debounce 600ms</div>
+      <div style="margin-top:4px;font-size:11px;color:var(--text3)">Wijzigingen worden direct opgeslagen via Supabase - debounce 600ms</div>
     </div>`;}
 
 function pp(v){return(v*100).toFixed(1)+'%';}
@@ -1336,8 +1336,6 @@ function getLabel(key){
 }
 
 
-let curKey=4,curMTKey=4,mainTab='data',riskTab='2026';
-const cardView={};
 
 function switchMainTab(tab){
   mainTab=tab;
@@ -1529,7 +1527,6 @@ function legH(){
     `<span class="cl"><span style="display:inline-block;width:14px;height:0;border-top:2px dashed var(--target);vertical-align:middle;margin-right:2px"></span><span style="color:var(--target)">80%</span></span>`;
 }
 
-let czp=null,cpf=null,cmv=null,cmulti=null;
 
 
 
