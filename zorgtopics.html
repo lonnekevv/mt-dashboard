@@ -1158,8 +1158,8 @@ function renderBeheer() {
           <div>
             <label style="font-size:12px;font-weight:500;color:var(--text2);display:block;margin-bottom:4px">${t.charAt(0).toUpperCase()+t.slice(1)}</label>
             <label style="display:flex;align-items:center;gap:8px;padding:10px 12px;border:1.5px dashed var(--border2);border-radius:var(--rsm);cursor:pointer;background:var(--surface2);transition:border-color .15s" id="lbl-${t.replace(' ','-')}">
-              <span style="font-size:18px">📄</span>
-              <span style="font-size:12px;color:var(--text3)" id="fn-${t.replace(' ','-')}">Kies Excel bestand</span>
+              <span style="font-size:18px" id="ic-${t.replace(' ','-')}">📄</span>
+              <span style="font-size:12px;color:var(--text3);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" id="fn-${t.replace(' ','-')}">Kies Excel bestand</span>
               <input type="file" accept=".xlsx" style="display:none" onchange="handleFileSelect(this,'${t}')">
             </label>
           </div>
@@ -1758,8 +1758,10 @@ function handleFileSelect(input, topic) {
   selectedFiles[topic] = file;
   const span = document.getElementById('fn-' + topic.replace(' ','-'));
   const lbl  = document.getElementById('lbl-' + topic.replace(' ','-'));
-  if (span) span.textContent = file.name;
-  if (lbl)  lbl.style.borderColor = '#1a7a4a';
+  const ic   = document.getElementById('ic-' + topic.replace(' ','-'));
+  if (span) { span.textContent = file.name; span.style.color = '#1a7a4a'; span.title = file.name; }
+  if (lbl)  { lbl.style.borderColor = '#1a7a4a'; lbl.style.background = '#e6f4ec'; }
+  if (ic)   ic.textContent = '✅';
 }
 
 async function loadSheetJS() {
@@ -1851,7 +1853,15 @@ async function slaDataOp() {
 
     beheerState.saving = false;
     beheerState.savedMsg = '✓ Opgeslagen! ' + (MONTHS[maand] ? MONTHS[maand].label : maand) + ' ' + jaar + ' is nu zichtbaar in het dashboard.';
-    TOPICS.forEach(t => { selectedFiles[t] = null; });
+    TOPICS.forEach(t => {
+      selectedFiles[t] = null;
+      const span = document.getElementById('fn-' + t.replace(' ','-'));
+      const lbl  = document.getElementById('lbl-' + t.replace(' ','-'));
+      const ic   = document.getElementById('ic-' + t.replace(' ','-'));
+      if (span) { span.textContent = 'Kies Excel bestand'; span.style.color = ''; span.title = ''; }
+      if (lbl)  { lbl.style.borderColor = ''; lbl.style.background = ''; }
+      if (ic)   ic.textContent = '📄';
+    });
     loadUploadLog(); // ververs de uploadstatus
     renderBeheer();
   } catch(e) {
