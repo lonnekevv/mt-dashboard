@@ -1745,17 +1745,6 @@ function parseZorgTopicsExcel(arrayBuffer) {
 }
 
 // ── BEHEER RENDER ────────────────────────────────────────────────────────────
-let beheerState = {
-  preview: null,
-  saving: false,
-  savedMsg: '',
-  uploadErr: '',
-  sheetJSLoaded: false,
-  uploadLog: {},   // { "2026_4": { topics: ['lage rug','nek','schouder'], ts: '...' }, ... }
-};
-
-// Laad uploadlog uit Supabase
-async 
 function prefillUpload(jaar, maand) {
   // Scroll naar upload sectie en selecteer jaar/maand
   document.getElementById('bh-jaar').value = String(jaar);
