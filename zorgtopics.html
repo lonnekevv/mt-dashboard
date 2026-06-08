@@ -335,7 +335,17 @@ let mvData = {
 
 function getMV(yr,key,topic){
   const k=String(key);
-  return mvData[yr]?.[k]?.[topic]??null;
+  // Als kwartaal direct opgeslagen is, gebruik dat
+  if(mvData[yr]?.[k]?.[topic]!=null) return mvData[yr][k][topic];
+  // Anders: som van de maanden van dat kwartaal
+  if(k.startsWith('Q')){
+    const qn=parseInt(k[1]);
+    const qMonths=[qn*3-2,qn*3-1,qn*3];
+    let sum=0,found=false;
+    qMonths.forEach(m=>{const v=mvData[yr]?.[String(m)]?.[topic];if(v!=null){sum+=v;found=true;}});
+    return found?sum:null;
+  }
+  return null;
 }
 
 function setMV(yr,key,topic,val){
@@ -370,11 +380,16 @@ function totals(rows){
 function getRows(key,ds){
   ds=ds||DATA;
   if(typeof key==='number')return(ds[key]||[]).map(f=>({...f}));
-  const qn=parseInt(key[1]),months=Object.keys(ds).map(Number).filter(m=>MONTHS[m].q===qn);
-  const all=[];months.forEach(m=>ds[m].forEach(f=>all.push({...f})));
+  // Kwartaal: altijd berekenen uit de losse maanden (niet uit opgeslagen Q-data)
+  const qn=parseInt(key[1]);
+  const qMonths=[qn*3-2, qn*3-1, qn*3]; // bijv. Q1 = [1,2,3], Q2 = [4,5,6]
+  const availMonths=qMonths.filter(m=>ds[m]&&ds[m].length>0);
+  if(!availMonths.length)return[];
+  const all=[];availMonths.forEach(m=>ds[m].forEach(f=>all.push({...f})));
   return TOPICS.map(t=>{
     const s=all.filter(f=>f.topic===t);if(!s.length)return null;
-    const tt=s.reduce((a,f)=>a+f.totaal,0),tc=s.reduce((a,f)=>a+f.csi,0),tz=s.reduce((a,f)=>a+f.zorgplan,0),tp=s.reduce((a,f)=>a+f.pf,0);
+    const tt=s.reduce((a,f)=>a+f.totaal,0),tc=s.reduce((a,f)=>a+f.csi,0),
+          tz=s.reduce((a,f)=>a+f.zorgplan,0),tp=s.reduce((a,f)=>a+f.pf,0);
     return{topic:t,totaal:tt,csi:tc,zorgplan:tz,pf:tp,
       low:tp?s.reduce((a,f)=>a+(f.low*f.pf),0)/tp:0,
       med:tp?s.reduce((a,f)=>a+(f.med*f.pf),0)/tp:0,
@@ -391,21 +406,20 @@ function getWeightedCorrPF(key,yr){
 
 function getLabel(key){
   if(typeof key==='number')return MONTHS[key].label;
-  const qn=parseInt(key[1]),avail=Object.keys(DATA).map(Number).filter(m=>MONTHS[m].q===qn).sort((a,b)=>a-b);
-  const filtAvail=avail.filter(m=>MONTHS[m]);return key+(filtAvail.length?' ('+filtAvail.map(m=>MONTHS[m].short).join('–')+')':'');
+  const qn=parseInt(key[1]);
+  const qMonths=[qn*3-2,qn*3-1,qn*3].filter(m=>MONTHS[m]);
+  const avail=qMonths.filter(m=>DATA[m]&&DATA[m].length>0);
+  const suffix=avail.length?(' ('+avail.map(m=>MONTHS[m].short).join('–')+')'):('');
+  return key+suffix;
 }
 
 function buildNavItems(){
-  // Filter alleen numerieke maandsleutels (geen 'Q1' etc.)
   const avail=Object.keys(DATA).map(Number).filter(n=>!isNaN(n)).sort((a,b)=>a-b);
   const qg={};avail.forEach(m=>{const q=MONTHS[m].q;if(!qg[q])qg[q]=[];qg[q].push(m);});
   const items=[];
   Object.keys(qg).map(Number).filter(n=>!isNaN(n)).sort((a,b)=>b-a).forEach(q=>{
     qg[q].sort((a,b)=>b-a).forEach(m=>items.push({type:'month',m}));
-    // Kwartaal alleen tonen als alle 3 maanden data hebben
-    const allMonths=[1,2,3].map(i=>q*3-3+i);
-    const hasQ=DATA['Q'+q]&&DATA['Q'+q].length>0;
-    if(hasQ)items.push({type:'q',q});
+    items.push({type:'q',q}); // altijd tonen als er maanden zijn
   });
   return items;
 }
@@ -1234,7 +1248,7 @@ async function slaDataOp() {
     if (q) herberekeningKwartaal(jaar, q, target);
 
     // Navigeer naar de zojuist opgeslagen maand
-    if (jaar !== 2025) curKey = maand;
+    if (jaar !== 2025) { curKey = maand; curMTKey = maand; }
     render(); renderCharts(); if(mainTab==='mt') renderMT();
 
     beheerState.saving = false;
@@ -1250,32 +1264,8 @@ async function slaDataOp() {
 }
 
 function herberekeningKwartaal(jaar, q, target) {
-  // Verzamel alle maanden van dit kwartaal die data hebben
-  const maandenInQ = Object.keys(MONTHS).map(Number).filter(m => MONTHS[m].q === q && target[m]);
-  if (!maandenInQ.length) return;
-
-  // Sla kwartaaldata op in Supabase als sommatie van de maanden
-  TOPICS.forEach(topic => {
-    let totaal=0, csi=0, zorgplan=0, pf=0, lowW=0, medW=0, highW=0;
-    maandenInQ.forEach(m => {
-      const r = (target[m] || []).find(x => x.topic === topic);
-      if (!r) return;
-      totaal   += r.totaal;
-      csi      += r.csi;
-      zorgplan += r.zorgplan;
-      pf       += r.pf;
-      lowW     += r.low * r.pf;
-      medW     += r.med * r.pf;
-      highW    += r.high * r.pf;
-    });
-    const qVals = {
-      totaal, csi, zorgplan, pf,
-      low:  pf > 0 ? lowW/pf  : 0,
-      med:  pf > 0 ? medW/pf  : 0,
-      high: pf > 0 ? highW/pf : 0,
-    };
-    saveDataRow(jaar, 'Q'+q, topic, qVals).catch(e => console.warn('Q opslaan:', e));
-  });
+  // Kwartalen worden nu live berekend via getRows(), niet apart opgeslagen.
+  // Deze functie doet niets meer maar blijft bestaan voor compatibiliteit.
 }
 
 // ── INIT ───────────────────────────────────────────────────────────────────
