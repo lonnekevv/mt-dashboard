@@ -1752,6 +1752,8 @@ function prefillUpload(jaar, maand) {
   document.getElementById('bh-jaar').scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
+const selectedFiles = { 'lage rug': null, 'nek': null, 'schouder': null };
+
 function handleFileSelect(input, topic) {
   const file = input.files[0];
   if (!file) return;
