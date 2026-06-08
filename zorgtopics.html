@@ -183,6 +183,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);fon
   <div class="main-tabs">
     <button class="mtab active" onclick="switchMainTab('data')">Overzicht Data ZorgTopics</button>
     <button class="mtab" onclick="switchMainTab('mt')">MT-analyse</button>
+    <button class="mtab" onclick="switchMainTab('beheer')">📁 Data beheer</button>
   </div>
 
   <div class="tab-pane active" id="tab-data">
@@ -216,6 +217,13 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);fon
     </div>
     <div id="mt-content"></div>
   </div>
+  <div class="tab-pane" id="tab-beheer">
+    <div class="mt-header">
+      <h2>Data beheer</h2>
+      <p>Upload Excel-bestanden per maand of pas Menzis+VGZ correctiewaarden aan. Wijzigingen worden direct gedeeld met alle MT-leden.</p>
+    </div>
+    <div id="beheer-content"></div>
+  </div>
 </div>
 
 <script>
@@ -223,7 +231,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);fon
 const SB_URL  = 'https://szunargvsmtzbbnmnghc.supabase.co/rest/v1';
 const SB_KEY  = 'sb_publishable_EiIt1zJuqgjj-2FJ4mXTlg__kmUrPu5';
 const SB_HDR  = { 'Content-Type': 'application/json', 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY };
-const MV_TABLE = 'zorgtopics_mv';
+const MV_TABLE   = 'zorgtopics_mv';
+const DATA_TABLE = 'zorgtopics_data';
 
 // Debounce helper — waits 600ms after last keystroke before saving
 function debounce(fn, ms) {
@@ -403,10 +412,11 @@ const cardView={};
 
 function switchMainTab(tab){
   mainTab=tab;
-  document.querySelectorAll('.mtab').forEach((b,i)=>b.classList.toggle('active',['data','mt'][i]===tab));
+  document.querySelectorAll('.mtab').forEach((b,i)=>b.classList.toggle('active',['data','mt','beheer'][i]===tab));
   document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active'));
   document.getElementById('tab-'+tab).classList.add('active');
   if(tab==='mt')renderMT();
+  if(tab==='beheer')renderBeheer();
 }
 
 function makeBtn(lbl,isQ,active,onclick,cls){
@@ -790,10 +800,397 @@ function render(){
   renderRisk(rows,prevRows);
 }
 
+// ── SUPABASE DATA FUNCTIES ───────────────────────────────────────────────
+
+// Laad inclusiecijfers uit Supabase en merge met ingebakken data
+async function loadDataFromSupabase() {
+  try {
+    const r = await fetch(`${SB_URL}/${DATA_TABLE}?select=*`, { headers: SB_HDR });
+    if (!r.ok) return; // stil falen, ingebakken data blijft
+    const rows = await r.json();
+    if (!rows.length) return;
+    // Bouw DATA en DATA_PREV opnieuw op vanuit Supabase
+    // Behoud ingebakken data voor maanden die NIET in DB staan
+    rows.forEach(row => {
+      const target = row.jaar === 2025 ? DATA_PREV : DATA;
+      const m = row.maand;
+      if (!target[m]) target[m] = [];
+      // Verwijder bestaande rij voor dit topic en vervang
+      target[m] = target[m].filter(r => r.topic !== row.topic);
+      target[m].push({
+        topic: row.topic,
+        totaal: row.totaal,
+        csi: row.csi,
+        zorgplan: row.zorgplan,
+        pf: row.pf,
+        low: row.low,
+        med: row.med,
+        high: row.high
+      });
+    });
+    render(); renderCharts(); if(mainTab==='mt') renderMT();
+  } catch(e) {
+    console.warn('Data laden mislukt:', e);
+  }
+}
+
+async function saveDataRow(jaar, maand, topic, vals) {
+  const id = jaar + '_' + maand + '_' + topic.replace(' ', '_');
+  const r = await fetch(`${SB_URL}/${DATA_TABLE}`, {
+    method: 'POST',
+    headers: { ...SB_HDR, 'Prefer': 'resolution=merge-duplicates' },
+    body: JSON.stringify({ id, jaar, maand, topic, ...vals, updated_at: new Date().toISOString() })
+  });
+  if (!r.ok) { const t = await r.text(); throw new Error('HTTP ' + r.status + ': ' + t); }
+}
+
+// ── EXCEL PARSER ─────────────────────────────────────────────────────────────
+// Parst een ZorgTopics Excel file (SheetJS) naar een data-object
+function parseZorgTopicsExcel(arrayBuffer) {
+  // Minimale XLSX parser voor de vaste structuur: rij 1 = headers, rij 2 = data
+  // We lezen alleen de data-rij (rij index 1, 0-based)
+  // Kolommen: totaal, csi, zorgplan, pf_abs, pf_pct, low, med, high
+  const dv = new DataView(arrayBuffer);
+  // Gebruik SheetJS via CDN (laden we dynamisch)
+  return null; // wordt vervangen door echte parser na SheetJS laden
+}
+
+// ── BEHEER RENDER ────────────────────────────────────────────────────────────
+let beheerState = {
+  preview: null,     // { jaar, maand, rows: [{topic, vals}] }
+  saving: false,
+  savedMsg: '',
+  uploadErr: '',
+  sheetJSLoaded: false,
+  // MV invoer state: { cur: {m: {topic: val}}, prev: {m: {topic: val}} }
+};
+
+function renderBeheer() {
+  const c = document.getElementById('beheer-content');
+  if (!c) return;
+
+  const s = beheerState;
+  const maandNamen = Object.fromEntries(Object.entries(MONTHS).map(([k,v])=>[k,v.label]));
+
+  // ── SECTIE 1: Excel upload ──────────────────────────────────────────────
+  let uploadHTML = `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:20px;margin-bottom:20px;box-shadow:var(--sh)">
+      <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px">📂 Inclusiecijfers uploaden</div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:16px">Upload de drie Excel-bestanden voor één maand (lage rug, nek, schouder). De kwartaalcijfers worden automatisch herberekend.</div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+        <div>
+          <label style="font-size:12px;font-weight:500;color:var(--text2);display:block;margin-bottom:4px">Jaar</label>
+          <select id="bh-jaar" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:var(--rsm);font-family:'DM Sans',sans-serif;font-size:13px;background:var(--surface)">
+            <option value="2026">2026 (huidig jaar)</option>
+            <option value="2025">2025 (vorig jaar)</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:12px;font-weight:500;color:var(--text2);display:block;margin-bottom:4px">Maand</label>
+          <select id="bh-maand" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:var(--rsm);font-family:'DM Sans',sans-serif;font-size:13px;background:var(--surface)">
+            ${Object.entries(MONTHS).map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">
+        ${['lage rug','nek','schouder'].map(t=>`
+          <div>
+            <label style="font-size:12px;font-weight:500;color:var(--text2);display:block;margin-bottom:4px">${t.charAt(0).toUpperCase()+t.slice(1)}</label>
+            <label style="display:flex;align-items:center;gap:8px;padding:10px 12px;border:1.5px dashed var(--border2);border-radius:var(--rsm);cursor:pointer;background:var(--surface2);transition:border-color .15s" id="lbl-${t.replace(' ','-')}">
+              <span style="font-size:18px">📄</span>
+              <span style="font-size:12px;color:var(--text3)" id="fn-${t.replace(' ','-')}">Kies Excel bestand</span>
+              <input type="file" accept=".xlsx" style="display:none" onchange="handleFileSelect(this,'${t}')">
+            </label>
+          </div>
+        `).join('')}
+      </div>
+
+      ${s.uploadErr ? `<div style="background:#fdecea;color:#c0392b;border:1px solid #f5bbb7;border-radius:var(--rsm);padding:8px 12px;font-size:12px;margin-bottom:12px">⚠ ${s.uploadErr}</div>` : ''}
+
+      <button onclick="verwerkUpload()" style="padding:8px 18px;background:var(--green);color:#fff;border:none;border-radius:var(--rsm);font-size:13px;font-weight:500;cursor:pointer;font-family:'DM Sans',sans-serif">
+        Verwerken en preview tonen
+      </button>
+    </div>`;
+
+  // ── PREVIEW ──────────────────────────────────────────────────────────────
+  let previewHTML = '';
+  if (s.preview) {
+    const { jaar, maand, rows } = s.preview;
+    const mNaam = maandNamen[maand] || maand;
+    const kwartaal = MONTHS[maand]?.q;
+    previewHTML = `
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:20px;margin-bottom:20px;box-shadow:var(--sh)">
+        <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px">👁 Preview — ${mNaam} ${jaar}</div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:14px">Controleer de data voordat je opslaat. Q${kwartaal} wordt automatisch herberekend na opslaan.</div>
+        <div style="overflow-x:auto;margin-bottom:14px">
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead><tr style="background:var(--surface2)">
+              <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);font-weight:500;color:var(--text2)">ZorgTopic</th>
+              <th style="padding:8px 10px;text-align:center;border-bottom:1px solid var(--border);font-weight:500;color:var(--text2)">Totaal</th>
+              <th style="padding:8px 10px;text-align:center;border-bottom:1px solid var(--border);font-weight:500;color:var(--text2)">CSI=009</th>
+              <th style="padding:8px 10px;text-align:center;border-bottom:1px solid var(--border);font-weight:500;color:var(--text2)">Zorgplan</th>
+              <th style="padding:8px 10px;text-align:center;border-bottom:1px solid var(--border);font-weight:500;color:var(--text2)">PF</th>
+              <th style="padding:8px 10px;text-align:center;border-bottom:1px solid var(--border);font-weight:500;color:var(--text2)">Low%</th>
+              <th style="padding:8px 10px;text-align:center;border-bottom:1px solid var(--border);font-weight:500;color:var(--text2)">Med%</th>
+              <th style="padding:8px 10px;text-align:center;border-bottom:1px solid var(--border);font-weight:500;color:var(--text2)">High%</th>
+            </tr></thead>
+            <tbody>
+              ${rows.map(row=>`
+                <tr style="border-bottom:1px solid var(--border)">
+                  <td style="padding:8px 10px;font-weight:500">${row.topic.charAt(0).toUpperCase()+row.topic.slice(1)}</td>
+                  <td style="padding:8px 10px;text-align:center">${row.vals.totaal}</td>
+                  <td style="padding:8px 10px;text-align:center">${row.vals.csi}</td>
+                  <td style="padding:8px 10px;text-align:center">${row.vals.zorgplan}</td>
+                  <td style="padding:8px 10px;text-align:center">${row.vals.pf}</td>
+                  <td style="padding:8px 10px;text-align:center">${(row.vals.low*100).toFixed(1)}%</td>
+                  <td style="padding:8px 10px;text-align:center">${(row.vals.med*100).toFixed(1)}%</td>
+                  <td style="padding:8px 10px;text-align:center">${(row.vals.high*100).toFixed(1)}%</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+        ${s.savedMsg ? `<div style="background:#e6f4ec;color:#1a7a4a;border:1px solid #b2dfc5;border-radius:var(--rsm);padding:8px 12px;font-size:12px;margin-bottom:12px">${s.savedMsg}</div>` : ''}
+        <div style="display:flex;gap:10px">
+          <button onclick="slaDataOp()" ${s.saving?'disabled':''} style="padding:8px 20px;background:#1a7a4a;color:#fff;border:none;border-radius:var(--rsm);font-size:13px;font-weight:500;cursor:pointer;font-family:'DM Sans',sans-serif">
+            ${s.saving ? '⏳ Opslaan…' : '💾 Opslaan en publiceren'}
+          </button>
+          <button onclick="beheerState.preview=null;renderBeheer()" style="padding:8px 14px;background:var(--surface2);color:var(--text2);border:1px solid var(--border);border-radius:var(--rsm);font-size:13px;cursor:pointer;font-family:'DM Sans',sans-serif">
+            Annuleren
+          </button>
+        </div>
+      </div>`;
+  }
+
+  // ── SECTIE 2: MV invoer ──────────────────────────────────────────────────
+  const mvHtml = buildMVInvoer();
+
+  c.innerHTML = uploadHTML + previewHTML + mvHtml;
+}
+
+function buildMVInvoer() {
+  const availMonths = Object.keys(DATA).map(Number).sort((a,b)=>a-b);
+  const qGroups = {};
+  availMonths.forEach(m => { const q='Q'+MONTHS[m].q; if(!qGroups[q])qGroups[q]=[]; qGroups[q].push(m); });
+
+  let rows = '';
+  availMonths.forEach(m => {
+    const mNaam = MONTHS[m].short;
+    rows += `<tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:7px 10px;font-weight:500;white-space:nowrap">${mNaam}</td>
+      ${TOPICS.map(t => {
+        const vCur = getMV('cur',m,t) ?? '';
+        const vPrev = getMV('prev',m,t) ?? '';
+        return `<td style="padding:4px 6px;text-align:center">
+          <input type="number" min="0" value="${vCur}" placeholder="—"
+            style="width:52px;text-align:center;padding:4px;border:1px solid var(--border);border-radius:4px;font-family:'DM Mono',monospace;font-size:12px;background:var(--surface)"
+            onchange="setMV('cur',${m},'${t}',this.value)">
+        </td>
+        <td style="padding:4px 6px;text-align:center">
+          <input type="number" min="0" value="${vPrev}" placeholder="—"
+            style="width:52px;text-align:center;padding:4px;border:1px solid var(--border);border-radius:4px;font-family:'DM Mono',monospace;font-size:12px;background:var(--surface2)"
+            onchange="setMV('prev',${m},'${t}',this.value)">
+        </td>`;
+      }).join('')}
+    </tr>`;
+  });
+
+  // Kwartalen
+  Object.entries(qGroups).forEach(([q, months]) => {
+    rows += `<tr style="border-bottom:1px solid var(--border);background:var(--surface2)">
+      <td style="padding:7px 10px;font-weight:600;color:var(--text2)">${q}</td>
+      ${TOPICS.map(t => {
+        const vCur = getMV('cur',q,t) ?? '';
+        const vPrev = getMV('prev',q,t) ?? '';
+        return `<td style="padding:4px 6px;text-align:center">
+          <input type="number" min="0" value="${vCur}" placeholder="—"
+            style="width:52px;text-align:center;padding:4px;border:1px solid var(--border);border-radius:4px;font-family:'DM Mono',monospace;font-size:12px;background:var(--surface)"
+            onchange="setMV('cur','${q}','${t}',this.value)">
+        </td>
+        <td style="padding:4px 6px;text-align:center">
+          <input type="number" min="0" value="${vPrev}" placeholder="—"
+            style="width:52px;text-align:center;padding:4px;border:1px solid var(--border);border-radius:4px;font-family:'DM Mono',monospace;font-size:12px;background:var(--surface2)"
+            onchange="setMV('prev','${q}','${t}',this.value)">
+        </td>`;
+      }).join('')}
+    </tr>`;
+  });
+
+  return `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:20px;box-shadow:var(--sh)">
+      <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px">🔢 Menzis + VGZ correctiewaarden</div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:16px">
+        Vul het aantal trajecten in dat Menzis of VGZ heeft gefactureerd. Wordt automatisch opgeslagen en gedeeld.
+        <br><span style="color:var(--text3)">Wit = huidig jaar (2026) · Grijs = vorig jaar (2025)</span>
+      </div>
+      <div style="overflow-x:auto">
+        <table style="border-collapse:collapse;font-size:12px;min-width:600px">
+          <thead><tr style="background:var(--surface2)">
+            <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);font-weight:500;color:var(--text2)">Periode</th>
+            ${TOPICS.map(t=>`
+              <th colspan="2" style="padding:8px 10px;text-align:center;border-bottom:1px solid var(--border);font-weight:500;color:var(--text2)">
+                ${t.charAt(0).toUpperCase()+t.slice(1)}
+              </th>`).join('')}
+          </tr>
+          <tr style="background:var(--surface2)">
+            <th style="border-bottom:2px solid var(--border)"></th>
+            ${TOPICS.map(()=>`
+              <th style="padding:4px 6px;text-align:center;border-bottom:2px solid var(--border);font-size:10px;color:var(--text3);font-weight:500">'26</th>
+              <th style="padding:4px 6px;text-align:center;border-bottom:2px solid var(--border);font-size:10px;color:var(--text3);font-weight:500;background:var(--surface2)">'25</th>
+            `).join('')}
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:var(--text3)">Wijzigingen worden direct opgeslagen via Supabase · debounce 600ms</div>
+    </div>`;
+}
+
+// ── BESTAND SELECTIE EN VERWERKING ──────────────────────────────────────────
+const selectedFiles = { 'lage rug': null, 'nek': null, 'schouder': null };
+
+function handleFileSelect(input, topic) {
+  const file = input.files[0];
+  if (!file) return;
+  selectedFiles[topic] = file;
+  const span = document.getElementById('fn-' + topic.replace(' ','-'));
+  const lbl  = document.getElementById('lbl-' + topic.replace(' ','-'));
+  if (span) span.textContent = file.name;
+  if (lbl)  lbl.style.borderColor = '#1a7a4a';
+}
+
+async function loadSheetJS() {
+  if (window.XLSX) return;
+  await new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    s.onload = resolve; s.onerror = reject;
+    document.head.appendChild(s);
+  });
+}
+
+async function verwerkUpload() {
+  beheerState.uploadErr = '';
+  const missing = TOPICS.filter(t => !selectedFiles[t]);
+  if (missing.length > 0) {
+    beheerState.uploadErr = 'Upload alle drie bestanden: ' + missing.join(', ');
+    renderBeheer(); return;
+  }
+  try {
+    await loadSheetJS();
+  } catch(e) {
+    beheerState.uploadErr = 'SheetJS kon niet geladen worden. Controleer je internetverbinding.';
+    renderBeheer(); return;
+  }
+
+  const jaar = parseInt(document.getElementById('bh-jaar').value);
+  const maand = parseInt(document.getElementById('bh-maand').value);
+  const rows = [];
+
+  for (const topic of TOPICS) {
+    const file = selectedFiles[topic];
+    try {
+      const buf = await file.arrayBuffer();
+      const wb  = XLSX.read(buf, { type: 'array' });
+      const ws  = wb.Sheets[wb.SheetNames[0]];
+      const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
+      // data[0] = headers, data[1] = waarden
+      if (!data[1]) throw new Error('Geen data in ' + file.name);
+      const [totaal, csi, zorgplan, pf, , low, med, high] = data[1];
+      rows.push({ topic, vals: {
+        totaal: parseInt(totaal) || 0,
+        csi:    parseInt(csi)    || 0,
+        zorgplan: parseInt(zorgplan) || 0,
+        pf:     parseInt(pf)     || 0,
+        low:    parseFloat(low)  || 0,
+        med:    parseFloat(med)  || 0,
+        high:   parseFloat(high) || 0,
+      }});
+    } catch(e) {
+      beheerState.uploadErr = 'Fout bij lezen van ' + file.name + ': ' + e.message;
+      renderBeheer(); return;
+    }
+  }
+  beheerState.preview = { jaar, maand, rows };
+  beheerState.savedMsg = '';
+  renderBeheer();
+}
+
+async function slaDataOp() {
+  const { jaar, maand, rows } = beheerState.preview;
+  beheerState.saving = true;
+  beheerState.savedMsg = '';
+  renderBeheer();
+
+  try {
+    // Sla elke topic-rij op
+    for (const row of rows) {
+      await saveDataRow(jaar, maand, row.topic, row.vals);
+    }
+
+    // Update lokale DATA
+    const target = jaar === 2025 ? DATA_PREV : DATA;
+    if (!target[maand]) target[maand] = [];
+    rows.forEach(row => {
+      target[maand] = target[maand].filter(r => r.topic !== row.topic);
+      target[maand].push({ topic: row.topic, ...row.vals });
+    });
+
+    // Herbereken kwartaal automatisch
+    const q = MONTHS[maand]?.q;
+    if (q) herberekeningKwartaal(jaar, q, target);
+
+    render(); renderCharts(); if(mainTab==='mt') renderMT();
+
+    beheerState.saving = false;
+    beheerState.savedMsg = '✓ Opgeslagen! ' + (MONTHS[maand]?.label || maand) + ' ' + jaar + ' is nu zichtbaar in het dashboard.';
+    // Reset geselecteerde bestanden
+    TOPICS.forEach(t => { selectedFiles[t] = null; });
+    renderBeheer();
+  } catch(e) {
+    beheerState.saving = false;
+    beheerState.savedMsg = '⚠ Fout: ' + e.message;
+    renderBeheer();
+  }
+}
+
+function herberekeningKwartaal(jaar, q, target) {
+  // Verzamel alle maanden van dit kwartaal die data hebben
+  const maandenInQ = Object.keys(MONTHS).map(Number).filter(m => MONTHS[m].q === q && target[m]);
+  if (!maandenInQ.length) return;
+
+  // Sla kwartaaldata op in Supabase als sommatie van de maanden
+  TOPICS.forEach(topic => {
+    let totaal=0, csi=0, zorgplan=0, pf=0, lowW=0, medW=0, highW=0;
+    maandenInQ.forEach(m => {
+      const r = (target[m] || []).find(x => x.topic === topic);
+      if (!r) return;
+      totaal   += r.totaal;
+      csi      += r.csi;
+      zorgplan += r.zorgplan;
+      pf       += r.pf;
+      lowW     += r.low * r.pf;
+      medW     += r.med * r.pf;
+      highW    += r.high * r.pf;
+    });
+    const qVals = {
+      totaal, csi, zorgplan, pf,
+      low:  pf > 0 ? lowW/pf  : 0,
+      med:  pf > 0 ? medW/pf  : 0,
+      high: pf > 0 ? highW/pf : 0,
+    };
+    saveDataRow(jaar, 'Q'+q, topic, qVals).catch(e => console.warn('Q opslaan:', e));
+  });
+}
+
 // ── INIT ───────────────────────────────────────────────────────────────────
 render(); renderCharts(); renderMTNav();
 // Load MV data from Supabase (overlays baked-in values)
 loadMVFromSupabase();
+// Load inclusiedata from Supabase
+loadDataFromSupabase();
 </script>
 </body>
 </html>
