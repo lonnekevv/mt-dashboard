@@ -1230,52 +1230,65 @@ function renderBeheer() {
 }
 
 function buildMVInvoer() {
-  // Altijd alle 12 maanden tonen, niet alleen maanden met data
+  // Altijd alle 12 maanden tonen voor alle jaren (dynamisch, net als uploadstatus)
   const availMonths = Object.keys(MONTHS).map(Number).sort((a,b)=>a-b);
   const qGroups = {};
   availMonths.forEach(m => { const q='Q'+MONTHS[m].q; if(!qGroups[q])qGroups[q]=[]; qGroups[q].push(m); });
+  const mvJaren = [];
+  const mvCurYear = new Date().getFullYear();
+  for(let y = mvCurYear + 1; y >= 2025; y--) mvJaren.push(y);
 
-  let rows = '';
-  availMonths.forEach(m => {
-    const mNaam = MONTHS[m]?.short || m;
-    rows += `<tr style="border-bottom:1px solid var(--border)">
-      <td style="padding:7px 10px;font-weight:500;white-space:nowrap">${mNaam}</td>
-      ${TOPICS.map(t => {
-        const vCur = getMV('cur',m,t) ?? '';
-        const vPrev = getMV('prev',m,t) ?? '';
-        return `<td style="padding:4px 6px;text-align:center">
-          <input type="number" min="0" value="${vCur}" placeholder="—"
-            style="width:52px;text-align:center;padding:4px;border:1px solid var(--border);border-radius:4px;font-family:'DM Mono',monospace;font-size:12px;background:var(--surface)"
-            onchange="setMV('cur',${m},'${t}',this.value)">
-        </td>
-        <td style="padding:4px 6px;text-align:center">
-          <input type="number" min="0" value="${vPrev}" placeholder="—"
-            style="width:52px;text-align:center;padding:4px;border:1px solid var(--border);border-radius:4px;font-family:'DM Mono',monospace;font-size:12px;background:var(--surface2)"
-            onchange="setMV('prev',${m},'${t}',this.value)">
-        </td>`;
-      }).join('')}
-    </tr>`;
-  });
+  // Bouw per jaar een sectie (dynamisch, nieuwste jaar bovenaan)
+  let jarenSections = '';
+  mvJaren.forEach(jaar => {
+    const isCur = jaar === mvCurYear;
+    const isPrev = jaar === mvCurYear - 1;
+    const yr = isCur ? 'cur' : isPrev ? 'prev' : 'jaar_' + jaar;
+    const jaarLabel = jaar + (isCur ? ' (huidig jaar)' : isPrev ? ' (vorig jaar)' : '');
 
-  // Kwartalen
-  Object.entries(qGroups).forEach(([q, months]) => {
-    rows += `<tr style="border-bottom:1px solid var(--border);background:var(--surface2)">
-      <td style="padding:7px 10px;font-weight:600;color:var(--text2)">${q}</td>
-      ${TOPICS.map(t => {
-        const vCur = getMV('cur',q,t) ?? '';
-        const vPrev = getMV('prev',q,t) ?? '';
-        return `<td style="padding:4px 6px;text-align:center">
-          <input type="number" min="0" value="${vCur}" placeholder="—"
-            style="width:52px;text-align:center;padding:4px;border:1px solid var(--border);border-radius:4px;font-family:'DM Mono',monospace;font-size:12px;background:var(--surface)"
-            onchange="setMV('cur','${q}','${t}',this.value)">
-        </td>
-        <td style="padding:4px 6px;text-align:center">
-          <input type="number" min="0" value="${vPrev}" placeholder="—"
-            style="width:52px;text-align:center;padding:4px;border:1px solid var(--border);border-radius:4px;font-family:'DM Mono',monospace;font-size:12px;background:var(--surface2)"
-            onchange="setMV('prev','${q}','${t}',this.value)">
-        </td>`;
-      }).join('')}
-    </tr>`;
+    let rows = '';
+    availMonths.forEach(m => {
+      const mNaam = MONTHS[m]?.short || m;
+      rows += `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:7px 10px;font-weight:500;white-space:nowrap">${mNaam}</td>
+        ${TOPICS.map(t => {
+          const val = getMV(yr, m, t) ?? '';
+          return `<td style="padding:4px 6px;text-align:center">
+            <input type="number" min="0" value="${val}" placeholder="—"
+              style="width:56px;text-align:center;padding:5px 4px;border:1px solid var(--border);border-radius:4px;font-family:'DM Mono',monospace;font-size:12px;background:var(--surface)"
+              onchange="setMV('${yr}',${m},'${t}',this.value)">
+          </td>`;
+        }).join('')}
+      </tr>`;
+    });
+
+    Object.keys(qGroups).forEach(q => {
+      rows += `<tr style="border-bottom:1px solid var(--border);background:var(--surface2)">
+        <td style="padding:7px 10px;font-weight:600;color:var(--text2)">${q}</td>
+        ${TOPICS.map(t => {
+          const val = getMV(yr, q, t) ?? '';
+          return `<td style="padding:4px 6px;text-align:center">
+            <input type="number" min="0" value="${val}" placeholder="—"
+              style="width:56px;text-align:center;padding:5px 4px;border:1px solid var(--border);border-radius:4px;font-family:'DM Mono',monospace;font-size:12px;background:var(--surface2)"
+              onchange="setMV('${yr}','${q}','${t}',this.value)">
+          </td>`;
+        }).join('')}
+      </tr>`;
+    });
+
+    jarenSections += `
+      <div style="margin-bottom:20px">
+        <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:8px;padding-bottom:5px;border-bottom:1.5px solid var(--border)">${jaarLabel}</div>
+        <div style="overflow-x:auto">
+          <table style="border-collapse:collapse;font-size:12px;min-width:350px">
+            <thead><tr style="background:var(--surface2)">
+              <th style="padding:7px 10px;text-align:left;border-bottom:1px solid var(--border);font-weight:500;color:var(--text2)">Periode</th>
+              ${TOPICS.map(t => `<th style="padding:7px 10px;text-align:center;border-bottom:1px solid var(--border);font-weight:500;color:var(--text2)">${t.charAt(0).toUpperCase()+t.slice(1)}</th>`).join('')}
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>`;
   });
 
   return `
@@ -1283,34 +1296,802 @@ function buildMVInvoer() {
       <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px">🔢 Menzis + VGZ correctiewaarden</div>
       <div style="font-size:12px;color:var(--text2);margin-bottom:16px">
         Vul het aantal trajecten in dat Menzis of VGZ heeft gefactureerd. Wordt automatisch opgeslagen en gedeeld.
-        <br><span style="color:var(--text3)">Wit = huidig jaar (2026) · Grijs = vorig jaar (2025)</span>
       </div>
-      <div style="overflow-x:auto">
-        <table style="border-collapse:collapse;font-size:12px;min-width:600px">
-          <thead><tr style="background:var(--surface2)">
-            <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);font-weight:500;color:var(--text2)">Periode</th>
-            ${TOPICS.map(t=>`
-              <th colspan="2" style="padding:8px 10px;text-align:center;border-bottom:1px solid var(--border);font-weight:500;color:var(--text2)">
-                ${t.charAt(0).toUpperCase()+t.slice(1)}
-              </th>`).join('')}
-          </tr>
-          <tr style="background:var(--surface2)">
-            <th style="border-bottom:2px solid var(--border)"></th>
-            ${TOPICS.map(()=>`
-              <th style="padding:4px 6px;text-align:center;border-bottom:2px solid var(--border);font-size:10px;color:var(--text3);font-weight:500">'26</th>
-              <th style="padding:4px 6px;text-align:center;border-bottom:2px solid var(--border);font-size:10px;color:var(--text3);font-weight:500;background:var(--surface2)">'25</th>
-            `).join('')}
-          </tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
+      ${jarenSections}
+      <div style="margin-top:4px;font-size:11px;color:var(--text3)">Wijzigingen worden direct opgeslagen via Supabase · debounce 600ms</div>
+    </div>`;} — Inclusie-overzicht 2026</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+:root{
+  --bg:#F7F6F3;--surface:#FFF;--surface2:#F0EEE9;
+  --border:#E4E1DA;--border2:#D4D0C8;
+  --text:#1A1917;--text2:#6B6860;--text3:#9E9B94;
+  --blue:#1A6EBF;--blue-bg:#E8F1FA;
+  --green:#1A7A52;--green-bg:#E6F4EE;
+  --purple:#5B3EC8;--purple-bg:#EEEAFC;
+  --amber:#B45309;--amber-bg:#FEF3DC;
+  --low:#4A8B2A;--low-bg:#E8F3DF;
+  --med:#8F6010;--med-bg:#FEF3DC;
+  --high:#A02020;--high-bg:#FDECEC;
+  --up:#1A7A52;--dn:#A02020;--neu:#6B6860;
+  --target:#E8880A;
+  --r:10px;--rsm:6px;
+  --sh:0 1px 3px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;min-height:100vh}
+.layout{max-width:1100px;margin:0 auto;padding:28px 24px}
+.back-link{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#2d6b55;text-decoration:none;margin-bottom:1.25rem;opacity:.8;font-family:'Outfit',sans-serif}
+.back-link:hover{opacity:1}
+.main-tabs{display:flex;margin-bottom:28px;border-bottom:2px solid var(--border)}
+.mtab{padding:10px 22px;font-size:13px;font-weight:500;cursor:pointer;border:none;background:none;color:var(--text3);font-family:'DM Sans',sans-serif;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .15s}
+.mtab:hover{color:var(--text2)}
+.mtab.active{color:var(--text);border-bottom-color:var(--text)}
+.tab-pane{display:none}.tab-pane.active{display:block}
+.header{margin-bottom:24px}
+.header-top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.header h1{font-size:20px;font-weight:500;letter-spacing:-.3px;margin-bottom:3px}
+.header-sub{font-size:13px;color:var(--text2)}
+.logo-mark{font-family:'DM Mono',monospace;font-size:11px;font-weight:500;background:var(--text);color:var(--bg);padding:4px 10px;border-radius:4px;letter-spacing:.05em}
+.period-nav{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:24px;padding:6px;background:var(--surface2);border-radius:var(--r);border:1px solid var(--border);width:fit-content}
+.pn-btn{padding:5px 14px;border-radius:6px;font-size:12px;font-weight:500;cursor:pointer;border:none;background:transparent;color:var(--text2);transition:all .15s;font-family:'DM Sans',sans-serif}
+.pn-btn:hover{background:var(--surface);color:var(--text)}
+.pn-btn.active{background:var(--surface);color:var(--text);box-shadow:var(--sh)}
+.pn-btn.qbtn{color:var(--blue)}
+.pn-btn.qbtn.active{background:var(--blue-bg);color:var(--blue)}
+.nav-sep{width:1px;background:var(--border2);align-self:stretch;margin:2px 0}
+.kpi-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:24px}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:14px 16px;box-shadow:var(--sh);position:relative;min-height:90px}
+.kpi-label{font-size:11px;font-weight:500;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px}
+.kpi-value{font-size:22px;font-weight:300;line-height:1;margin-bottom:4px;letter-spacing:-.5px}
+.kpi-value.blue{color:var(--blue)}.kpi-value.green{color:var(--green)}.kpi-value.purple{color:var(--purple)}
+.kpi-sub{font-size:11px;color:var(--text3)}
+.kpi-delta-br{position:absolute;bottom:10px;right:12px;font-size:10px;font-family:'DM Mono',monospace;font-weight:500}
+.up{color:var(--up)}.dn{color:var(--dn)}.neu{color:var(--neu)}
+.sec-label{font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);margin-bottom:12px}
+.topic-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:24px}
+.tc{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px;box-shadow:var(--sh)}
+.tc-name{font-size:13px;font-weight:500;margin-bottom:10px;display:flex;align-items:center;gap:6px}
+.tc-dot{width:6px;height:6px;border-radius:50%;background:var(--blue)}
+.yoy-toggle{display:flex;margin-bottom:12px;border:1px solid var(--border);border-radius:var(--rsm);overflow:hidden}
+.yoy-btn{flex:1;padding:5px 0;text-align:center;cursor:pointer;border:none;background:transparent;color:var(--text2);font-family:'DM Sans',sans-serif;font-size:11px;font-weight:500;transition:all .1s}
+.yoy-btn.active{background:var(--text);color:var(--bg)}
+.tc-counts{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:12px}
+.tc-stat{background:var(--surface2);border-radius:var(--rsm);padding:8px 10px;position:relative;min-height:62px}
+.tc-stat-val{font-size:18px;font-weight:300;line-height:1;margin-bottom:1px}
+.tc-stat-lbl{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em}
+.tc-stat-sub{font-size:10px;color:var(--text3);margin-top:3px}
+.tc-stat-delta{position:absolute;bottom:6px;right:8px;font-size:10px;font-family:'DM Mono',monospace;font-weight:500}
+.tc-bars{margin-bottom:12px}
+.bar-row{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.bar-track{flex:1;height:4px;background:var(--surface2);border-radius:2px;overflow:hidden;position:relative}
+.bar-fill{height:100%;border-radius:2px;transition:width .5s}
+.bar-fill-prev{position:absolute;top:0;left:0;height:100%;border-radius:2px;opacity:.22}
+.bar-pct{font-family:'DM Mono',monospace;font-size:11px;min-width:96px;text-align:right;color:var(--text2)}
+.bar-type{font-size:10px;color:var(--text3);min-width:70px}
+.bar-delta{font-size:10px;margin-left:3px}
+.mv-section{margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}
+.mv-input-row{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+.mv-label{font-size:10px;color:var(--text3);min-width:70px;text-transform:uppercase;letter-spacing:.04em}
+.mv-input{width:64px;font-family:'DM Mono',monospace;font-size:12px;padding:3px 6px;border:1px solid var(--border);border-radius:var(--rsm);background:var(--surface2);color:var(--text);text-align:right}
+.mv-input:focus{outline:none;border-color:var(--blue)}
+.mv-input.saving{border-color:var(--amber);background:#fffbe8}
+.mv-input.saved{border-color:var(--green)}
+.mv-saved{font-size:10px;color:var(--text3);font-style:italic;margin-top:2px}
+.risk-strip{height:6px;border-radius:3px;overflow:hidden;display:flex;gap:1px;margin-bottom:5px}
+.rs-l{background:#5A9E2F}.rs-m{background:#C4870D}.rs-h{background:#CC3333}
+.risk-mini{display:flex;gap:10px;font-size:10px;color:var(--text3)}
+.rdot{width:7px;height:7px;border-radius:1px;display:inline-block}
+.risk-wrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--sh);margin-bottom:24px;overflow:hidden}
+.risk-inner-tabs{display:flex;border-bottom:1px solid var(--border);background:var(--surface2)}
+.rit-btn{padding:8px 18px;font-size:12px;font-weight:500;cursor:pointer;border:none;background:transparent;color:var(--text3);font-family:'DM Sans',sans-serif;border-bottom:2px solid transparent;margin-bottom:-1px;transition:all .15s}
+.rit-btn.active{color:var(--text);border-bottom-color:var(--text);background:var(--surface)}
+.risk-pane{display:none}.risk-pane.active{display:block}
+.rtable{width:100%;border-collapse:collapse;font-size:12px}
+.rtable th{padding:9px 14px;text-align:left;font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:.07em;color:var(--text3);background:var(--surface2);border-bottom:1px solid var(--border)}
+.rtable th.r{text-align:right}
+.rtable td{padding:9px 14px;border-bottom:1px solid var(--border)}
+.rtable tr:last-child td{border-bottom:none;font-weight:500;background:var(--surface2)}
+.rtable td.r{text-align:right;font-family:'DM Mono',monospace}
+.badge{display:inline-flex;padding:2px 7px;border-radius:4px;font-size:11px;font-weight:500;font-family:'DM Mono',monospace}
+.bl{background:var(--low-bg);color:var(--low)}.bm{background:var(--med-bg);color:var(--med)}.bh{background:var(--high-bg);color:var(--high)}
+.no-prev{font-size:12px;color:var(--text3);padding:14px;font-style:italic}
+.chart-full{margin-bottom:14px}
+.chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:28px}
+.chart-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px;box-shadow:var(--sh)}
+.chart-title{font-size:12px;font-weight:500;color:var(--text2);margin-bottom:6px}
+.chart-legend{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px;align-items:center}
+.cl{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text2)}
+.cl-sq{width:10px;height:3px;border-radius:1px}
+.chart-wrap-lg{position:relative;width:100%;height:200px}
+.chart-wrap{position:relative;width:100%;height:160px}
+.divider{height:1px;background:var(--border);margin:20px 0}
+.footer{font-size:11px;color:var(--text3);margin-top:28px;text-align:right}
+.mt-header{margin-bottom:20px}
+.mt-header h2{font-size:16px;font-weight:500;margin-bottom:4px}
+.mt-header p{font-size:13px;color:var(--text2)}
+.mt-period-row{display:flex;align-items:center;gap:10px;margin-bottom:24px;flex-wrap:wrap}
+.mt-period-label{font-size:12px;font-weight:500;color:var(--text2)}
+.mt-pn-btn{padding:5px 14px;border-radius:6px;font-size:12px;font-weight:500;cursor:pointer;border:.5px solid var(--border);background:var(--surface);color:var(--text2);font-family:'DM Sans',sans-serif;transition:all .15s}
+.mt-pn-btn.active{background:var(--text);color:var(--bg);border-color:var(--text)}
+.mt-table-wrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;box-shadow:var(--sh);margin-bottom:20px}
+.mt-table-title{font-size:12px;font-weight:500;padding:10px 14px;background:var(--surface2);border-bottom:1px solid var(--border);color:var(--text2);display:flex;align-items:center;gap:8px}
+.target-badge{background:var(--amber-bg);color:var(--target);font-size:11px;padding:1px 7px;border-radius:20px;font-weight:500}
+.mt-table{width:100%;border-collapse:collapse;font-size:12px}
+.mt-table th{padding:8px 12px;text-align:left;font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:.07em;color:var(--text3);border-bottom:1px solid var(--border)}
+.mt-table th.r{text-align:right}
+.mt-table td{padding:9px 12px;border-bottom:1px solid var(--border)}
+.mt-table tr:last-child td{border-bottom:none}
+.mt-table td.r{text-align:right;font-family:'DM Mono',monospace}
+.mt-table td.b{font-weight:500}
+.mt-note{font-size:11px;color:var(--text3);padding:8px 14px;background:var(--surface2);border-top:1px solid var(--border)}
+.pill{display:inline-block;padding:1px 7px;border-radius:20px;font-size:11px;font-weight:500;font-family:'DM Mono',monospace}
+.pill-up{background:#E6F4EE;color:var(--up)}.pill-dn{background:#FEE2E2;color:var(--dn)}.pill-neu{background:var(--surface2);color:var(--neu)}
+.above-t{color:var(--up);font-weight:500}.below-t{color:var(--dn);font-weight:500}
+.theme-section{margin-bottom:20px}
+.theme-title{font-size:13px;font-weight:500;color:var(--text);margin-bottom:12px;padding-bottom:8px;border-bottom:1.5px solid var(--border);display:flex;align-items:center;gap:8px}
+.analysis-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.a-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:14px;box-shadow:var(--sh)}
+.a-card.total{background:var(--surface2);border-style:dashed}
+.a-card-topic{font-size:11px;font-weight:500;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px}
+.a-metric{display:flex;justify-content:space-between;align-items:center;margin-bottom:7px;gap:6px}
+.a-metric:last-child{margin-bottom:0}
+.a-metric-label{font-size:11px;color:var(--text2)}
+.a-metric-right{display:flex;align-items:center;gap:5px;flex-shrink:0}
+.a-val{font-family:'DM Mono',monospace;font-size:12px;font-weight:500}
+.a-val.hit{color:var(--up)}.a-val.miss{color:var(--dn)}
+.a-pill{font-family:'DM Mono',monospace;font-size:10px;padding:1px 6px;border-radius:12px;font-weight:500}
+.a-pill-up{background:#E6F4EE;color:var(--up)}.a-pill-dn{background:#FEE2E2;color:var(--dn)}.a-pill-neu{background:var(--surface2);color:var(--neu)}
+.a-divider{height:1px;background:var(--border);margin:8px 0}
+.risk-bars{margin-top:4px}
+.risk-bar-row{display:flex;align-items:center;gap:6px;margin-bottom:5px}
+.risk-bar-lbl{font-size:9px;color:var(--text3);width:12px;text-align:center}
+.risk-bar-track{flex:1;height:6px;background:var(--surface2);border-radius:3px;overflow:hidden}
+.risk-bar-fill{height:100%;border-radius:3px}
+.risk-bar-val{font-family:'DM Mono',monospace;font-size:10px;min-width:36px;text-align:right;color:var(--text2)}
+.risk-bar-delta{font-size:10px;min-width:44px;text-align:right}
+/* Supabase status bar */
+.sb-bar{display:flex;align-items:center;gap:8px;padding:7px 14px;border-radius:8px;font-size:11px;margin-bottom:20px;border:1px solid}
+.sb-bar.ok{background:#e6f4ec;color:#1a7a4a;border-color:#b2dfc5}
+.sb-bar.err{background:#fdecea;color:#c0392b;border-color:#f5bbb7}
+.sb-bar.loading{background:var(--surface2);color:var(--text3);border-color:var(--border)}
+.sb-bar button{font-size:11px;padding:2px 8px;border-radius:4px;cursor:pointer;background:transparent;font-family:'DM Sans',sans-serif}
+.sb-bar.ok button{border:1px solid #1a7a4a;color:#1a7a4a}
+.sb-bar.err button{border:1px solid #c0392b;color:#c0392b}
+@media(max-width:900px){.kpi-row{grid-template-columns:repeat(2,1fr)}.topic-grid,.analysis-grid{grid-template-columns:1fr 1fr}.chart-grid{grid-template-columns:1fr}}
+@media(max-width:600px){.analysis-grid,.topic-grid{grid-template-columns:1fr}}50%{opacity:.4}}
+
+</style>
+</head>
+<body>
+<div class="layout">  <a href="index.html" class="back-link">← MT Dashboard</a>
+
+  <!-- Supabase status bar -->
+  <div class="sb-bar loading" id="sb-bar">
+    <span id="sb-icon">⏳</span>
+    <span id="sb-msg">Menzis+VGZ data laden uit Supabase…</span>
+    <button onclick="loadMVFromSupabase()" style="margin-left:auto">Vernieuwen</button>
+  </div>
+
+  <div class="main-tabs">
+    <button class="mtab active" onclick="switchMainTab('data')">Overzicht Data ZorgTopics</button>
+    <button class="mtab" onclick="switchMainTab('mt')">MT-analyse</button>
+    <button class="mtab" onclick="switchMainTab('beheer')">📁 Data beheer</button>
+  </div>
+
+  <div class="tab-pane active" id="tab-data">
+    <div class="header">
+      <div class="header-top">
+        <div><h1>Inclusie-overzicht <span id="header-jaar"></span></h1><div class="header-sub">Lage rug · Nek · Schouder</div></div>
+        <div class="logo-mark">ZORGTOPICS</div>
       </div>
-      <div style="margin-top:10px;font-size:11px;color:var(--text3)">Wijzigingen worden direct opgeslagen via Supabase · debounce 600ms</div>
+    </div>
+    <div class="period-nav" id="period-nav"></div>
+    <div class="kpi-row" id="kpi-row"></div>
+    <div class="sec-label" id="sec-label-topics"></div>
+    <div class="topic-grid" id="topic-grid"></div>
+    <div class="sec-label">Risicoverdeling productfinanciering</div>
+    <div class="risk-wrap" id="risk-wrap"></div>
+    <div class="divider"></div>
+    <div class="sec-label">Trends — inclusiepercentages <span id="trends-jaar"></span></div>
+    <div class="chart-full" id="chart-zp-wrap"></div>
+    <div class="chart-grid" id="chart-pf-wrap"></div>
+    <div class="divider"></div>
+    <div class="sec-label">Meerjarentrend — inclusiepercentages per jaar</div>
+    <div id="chart-multiyear-wrap"></div>
+    <div class="footer">ZorgTopics inclusie-overzicht <span id="footer-jaar"></span> — Fyzio Totaal MT</div>
+  </div>
+
+  <div class="tab-pane" id="tab-mt">
+    <div class="mt-header">
+      <h2>MT-analyse</h2>
+      <p>Feitelijke analyse per thema voor het MT-overleg</p>
+    </div>
+    <div class="mt-period-row">
+      <span class="mt-period-label">Periode:</span>
+      <div id="mt-period-nav" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+    </div>
+    <div id="mt-content"></div>
+  </div>
+  <div class="tab-pane" id="tab-beheer">
+    <div class="mt-header">
+      <h2>Data beheer</h2>
+      <p>Upload Excel-bestanden per maand of pas Menzis+VGZ correctiewaarden aan. Wijzigingen worden direct gedeeld met alle MT-leden.</p>
+    </div>
+    <div id="beheer-content"></div>
+  </div>
+</div>
+
+<script>
+// ── SUPABASE CONFIG ────────────────────────────────────────────────────────
+const SB_URL  = 'https://szunargvsmtzbbnmnghc.supabase.co/rest/v1';
+const SB_KEY  = 'sb_publishable_EiIt1zJuqgjj-2FJ4mXTlg__kmUrPu5';
+const SB_HDR  = { 'Content-Type': 'application/json', 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY };
+const MV_TABLE   = 'zorgtopics_mv';
+const DATA_TABLE = 'zorgtopics_data';
+
+// Debounce helper — waits 600ms after last keystroke before saving
+function debounce(fn, ms) {
+  let t; return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+}
+
+async function loadMVFromSupabase() {
+  const bar = document.getElementById('sb-bar');
+  bar.className = 'sb-bar loading';
+  document.getElementById('sb-icon').textContent = '⏳';
+  document.getElementById('sb-msg').textContent = 'Data laden…';
+  try {
+    const r = await fetch(`${SB_URL}/${MV_TABLE}?select=id,yr,period,topic,waarde`, { headers: SB_HDR });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const rows = await r.json();
+    // Reset runtime mvData to baked values, then overlay with Supabase
+    mvData = { cur: JSON.parse(JSON.stringify(MV_DATA_BAKED.cur || {})), prev: JSON.parse(JSON.stringify(MV_DATA_BAKED.prev || {})) };
+    rows.forEach(row => {
+      const yr = row.yr, k = String(row.period), topic = row.topic, val = row.waarde;
+      if (!mvData[yr]) mvData[yr] = {};
+      if (!mvData[yr][k]) mvData[yr][k] = {};
+      mvData[yr][k][topic] = val;
+    });
+    bar.className = 'sb-bar ok';
+    document.getElementById('sb-icon').textContent = '☁️';
+    document.getElementById('sb-msg').textContent = rows.length + ' Menzis+VGZ waarden geladen · wijzigingen worden automatisch opgeslagen';
+    render(); renderCharts(); if(mainTab==='mt') renderMT();
+  } catch(e) {
+    bar.className = 'sb-bar err';
+    document.getElementById('sb-icon').textContent = '⚠️';
+    document.getElementById('sb-msg').textContent = 'Laden mislukt (' + e.message + ') — lokale waarden worden gebruikt';
+  }
+}
+
+async function saveMVToSupabase(yr, key, topic, value) {
+  const id = yr + '|' + String(key) + '|' + topic;
+  try {
+    await fetch(`${SB_URL}/${MV_TABLE}`, {
+      method: 'POST',
+      headers: { ...SB_HDR, 'Prefer': 'resolution=merge-duplicates' },
+      body: JSON.stringify({ id, yr, period: String(key), topic, waarde: value === null ? null : parseInt(value), updated_at: new Date().toISOString() })
+    });
+  } catch(e) {
+    console.warn('MV opslaan mislukt:', e);
+  }
+}
+
+const debouncedSaveMV = debounce(saveMVToSupabase, 600);
+
+// ── STATIC DATA ────────────────────────────────────────────────────────────
+
+const MONTHS={1:{label:'Januari',short:'Jan',q:1},2:{label:'Februari',short:'Feb',q:1},3:{label:'Maart',short:'Mrt',q:1},4:{label:'April',short:'Apr',q:2},5:{label:'Mei',short:'Mei',q:2},6:{label:'Juni',short:'Jun',q:2},7:{label:'Juli',short:'Jul',q:3},8:{label:'Augustus',short:'Aug',q:3},9:{label:'September',short:'Sep',q:3},10:{label:'Oktober',short:'Okt',q:4},11:{label:'November',short:'Nov',q:4},12:{label:'December',short:'Dec',q:4}};
+const TOPICS=['lage rug','nek','schouder'];
+const PAL=['#1A6EBF','#1A7A52','#C05020'];
+const DASHES=[[],[5,3],[2,2]];
+const TARGET=80;
+
+const DATA={
+  1:[{topic:'lage rug',totaal:50,csi:49,zorgplan:40,pf:22,low:.5,med:.318,high:.182},
+     {topic:'nek',     totaal:20,csi:20,zorgplan:17,pf:7, low:.714,med:.286,high:0},
+     {topic:'schouder',totaal:23,csi:23,zorgplan:14,pf:13,low:.385,med:.615,high:0}],
+  2:[{topic:'lage rug',totaal:27,csi:25,zorgplan:24,pf:14,low:.643,med:.357,high:0},
+     {topic:'nek',     totaal:16,csi:16,zorgplan:16,pf:8, low:.5,  med:.5,  high:0},
+     {topic:'schouder',totaal:25,csi:23,zorgplan:17,pf:8, low:.375,med:.5,  high:.125}],
+  3:[{topic:'lage rug',totaal:30,csi:28,zorgplan:24,pf:9, low:.44, med:.44, high:.11},
+     {topic:'nek',     totaal:15,csi:15,zorgplan:14,pf:5, low:.8,  med:.2,  high:0},
+     {topic:'schouder',totaal:17,csi:14,zorgplan:10,pf:2, low:.67, med:.33, high:0}],
+  4:[{topic:'lage rug',totaal:33,csi:31,zorgplan:27,pf:10,low:.5,  med:.4,  high:.1},
+     {topic:'nek',     totaal:17,csi:17,zorgplan:17,pf:6, low:1,   med:0,   high:0},
+     {topic:'schouder',totaal:17,csi:14,zorgplan:10,pf:2, low:.5,  med:0,   high:.5}],
+};
+const DATA_PREV={
+  4:[{topic:'lage rug',totaal:22,csi:21,zorgplan:18,pf:9, low:.556,med:.333,high:.111},
+     {topic:'nek',     totaal:15,csi:15,zorgplan:10,pf:3, low:.333,med:.333,high:.333},
+     {topic:'schouder',totaal:11,csi:11,zorgplan:8, pf:2, low:0,   med:1,   high:0}],
+};
+
+const MV_DATA_BAKED = {
+  cur: {
+    1:  {'lage rug': 25, 'nek': 11, 'schouder': 15},
+    2:  {'lage rug': 14, 'nek': 10, 'schouder': 10},
+    3:  {'lage rug': 16, 'nek': 14, 'schouder':  8},
+    4:  {'lage rug': 15, 'nek':  8, 'schouder':  7},
+    'Q1': {'lage rug': 55, 'nek': 35, 'schouder': 33},
+  },
+  prev: {
+    1:  {'lage rug': 24, 'nek': 12, 'schouder':  4},
+    2:  {'lage rug': 23, 'nek': 10, 'schouder': 13},
+    3:  {'lage rug': 13, 'nek':  9, 'schouder': 15},
+    4:  {'lage rug': 14, 'nek':  9, 'schouder':  6},
+    'Q1': {'lage rug': 60, 'nek': 31, 'schouder': 32},
+  }
+};
+
+// Runtime MV — starts from baked, gets overwritten by Supabase on load
+let mvData = {
+  cur: JSON.parse(JSON.stringify(MV_DATA_BAKED.cur || {})),
+  prev: JSON.parse(JSON.stringify(MV_DATA_BAKED.prev || {}))
+};
+
+
+
+function pp(v){return(v*100).toFixed(1)+'%';}
+function cap(s){return s[0].toUpperCase()+s.slice(1);}
+function arr(d){return d>0.5?'↑':d<-0.5?'↓':'→';}
+function acls(d){return d>0.5?'up':d<-0.5?'dn':'neu';}
+function sgn(d){return d>0?'+':'';}
+function dpill(d,u){const c=d>0.5?'pill-up':d<-0.5?'pill-dn':'pill-neu';return`<span class="pill ${c}">${sgn(d)}${d.toFixed(1)}${u||''}</span>`;}
+function apill(d,u){const c=d>0.5?'a-pill-up':d<-0.5?'a-pill-dn':'a-pill-neu';return`<span class="a-pill ${c}">${arr(d)} ${sgn(d)}${Math.abs(d).toFixed(1)}${u||''}</span>`;}
+
+function totals(rows){
+  const tt=rows.reduce((s,f)=>s+f.totaal,0),tc=rows.reduce((s,f)=>s+f.csi,0);
+  const tz=rows.reduce((s,f)=>s+f.zorgplan,0),tp=rows.reduce((s,f)=>s+f.pf,0);
+  return{totaal:tt,csi:tc,zorgplan:tz,pf:tp,pzp:tt?tz/tt:0,ppf:tc?tp/tc:0,
+    low:tp?rows.reduce((s,f)=>s+(f.low*f.pf),0)/tp:0,
+    med:tp?rows.reduce((s,f)=>s+(f.med*f.pf),0)/tp:0,
+    high:tp?rows.reduce((s,f)=>s+(f.high*f.pf),0)/tp:0};
+}
+
+
+function getWeightedCorrPF(key,yr){
+  const rows=getRows(key,yr==='prev'?DATA_PREV:undefined);
+  let num=0,den=0;
+  rows.forEach(f=>{const mv=getMV(yr,key,f.topic);if(mv!=null&&mv>0){num+=f.pf;den+=mv;}});
+  return den>0?num/den:null;
+}
+
+function getLabel(key){
+  if(typeof key==='number')return MONTHS[key].label;
+  const qn=parseInt(key[1]);
+  const qMonths=[qn*3-2,qn*3-1,qn*3].filter(m=>MONTHS[m]);
+  const avail=qMonths.filter(m=>DATA[m]&&DATA[m].length>0);
+  const suffix=avail.length?(' ('+avail.map(m=>MONTHS[m].short).join('–')+')'):('');
+  return key+suffix;
+}
+
+
+let curKey=4,curMTKey=4,mainTab='data',riskTab='2026';
+const cardView={};
+
+function switchMainTab(tab){
+  mainTab=tab;
+  document.querySelectorAll('.mtab').forEach((b,i)=>b.classList.toggle('active',['data','mt','beheer'][i]===tab));
+  document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active'));
+  document.getElementById('tab-'+tab).classList.add('active');
+  if(tab==='data'){ render(); renderCharts(); }
+  if(tab==='mt')renderMT();
+  if(tab==='beheer')renderBeheer();
+}
+
+function makeBtn(lbl,isQ,active,onclick,cls){
+  const b=document.createElement('button');
+  b.className=(cls||(isQ?'pn-btn qbtn':'pn-btn'))+(active?' active':'');
+  b.textContent=lbl;b.onclick=onclick;return b;
+}
+
+function renderNav(){
+  const items=buildNavItems(),nav=document.getElementById('period-nav');
+  nav.innerHTML='';let pt=null;
+  items.forEach(item=>{
+    if(pt==='q'&&item.type==='month'){const s=document.createElement('div');s.className='nav-sep';nav.appendChild(s);}
+    if(item.type==='month')nav.appendChild(makeBtn(MONTHS[item.m].short,false,curKey===item.m,()=>{curKey=item.m;render();}));
+    else{const k='Q'+item.q;nav.appendChild(makeBtn(k,true,curKey===k,()=>{curKey=k;render();}));}
+    pt=item.type;
+  });
+}
+
+function renderMTNav(){
+  const items=buildNavItems(),nav=document.getElementById('mt-period-nav');
+  nav.innerHTML='';
+  items.forEach(item=>{
+    if(item.type==='month')nav.appendChild(makeBtn(MONTHS[item.m].short,false,curMTKey===item.m,()=>{curMTKey=item.m;renderMT();},'mt-pn-btn'));
+    else{const k='Q'+item.q;nav.appendChild(makeBtn(k,true,curMTKey===k,()=>{curMTKey=k;renderMT();},'mt-pn-btn'));}
+  });
+}
+
+function renderKPIs(rows,prevRows){
+  const t=totals(rows),p=prevRows&&prevRows.length?totals(prevRows):null;
+  const corrCur=getWeightedCorrPF(curKey,'cur'),corrPrev=getWeightedCorrPF(curKey,'prev');
+  function dBR(d,fmt){if(d==null)return'';const c=acls(d);return`<div class="kpi-delta-br ${c}">${arr(d)} ${sgn(d)}${fmt==='int'?Math.round(d):d.toFixed(1)+'pp'}</div>`;}
+  const corrHTML=corrCur!=null
+    ?`<div class="kpi-value purple">${pp(corrCur)}</div><div class="kpi-sub">${corrCur*100>=TARGET?'✓ boven streef':'✗ onder streef'}</div>${corrPrev!=null?dBR((corrCur-corrPrev)*100):''}`
+    :`<div class="kpi-value" style="color:var(--text3);font-size:16px">—</div><div class="kpi-sub" style="font-style:italic">Vul Menzis+VGZ in</div>`;
+  document.getElementById('kpi-row').innerHTML=`
+    <div class="kpi"><div class="kpi-label">Totaal trajecten</div><div class="kpi-value">${t.totaal}</div>
+      ${p?`<div class="kpi-sub">${p.totaal} in 2025</div>${dBR(t.totaal-p.totaal,'int')}`:`<div class="kpi-sub">alle ZorgTopics</div>`}</div>
+    <div class="kpi"><div class="kpi-label">CSI = 009</div><div class="kpi-value">${t.csi}</div>
+      ${p?`<div class="kpi-sub">${p.csi} in 2025</div>${dBR(t.csi-p.csi,'int')}`:`<div class="kpi-sub">${(t.csi/t.totaal*100).toFixed(1)}% van totaal</div>`}</div>
+    <div class="kpi"><div class="kpi-label">Incl. % zorgplan</div><div class="kpi-value blue">${pp(t.pzp)}</div>
+      ${p?`<div class="kpi-sub">${pp(p.pzp)} in 2025</div>${dBR((t.pzp-p.pzp)*100)}`:`<div class="kpi-sub">${t.zorgplan} trajecten</div>`}</div>
+    <div class="kpi"><div class="kpi-label">Incl. % PF gecorr.</div>${corrHTML}</div>`;
+}
+
+function buildCard(f,isYoY,prevRow,key){
+  const yr=isYoY?'prev':'cur';
+  const df=isYoY&&prevRow?prevRow:f;
+  const pzp=f.totaal?f.zorgplan/f.totaal:0,ppf=f.csi?f.pf/f.csi:0;
+  const pPzp=prevRow&&prevRow.totaal?prevRow.zorgplan/prevRow.totaal:null;
+  const pPpf=prevRow&&prevRow.csi?prevRow.pf/prevRow.csi:null;
+  const dPzp=isYoY?pPzp:pzp,dPpf=isYoY?pPpf:ppf;
+  const mv=getMV(yr,key,f.topic);
+  const ppfMV=mv!=null&&mv>0?df.pf/mv:null;
+  const pMV=isYoY?null:getMV('prev',key,f.topic);
+  const pPpfMV=pMV!=null&&pMV>0&&prevRow?prevRow.pf/pMV:null;
+  const dLw=Math.round((df.low||0)*100),dMd=Math.round((df.med||0)*100),dHi=Math.round((df.high||0)*100);
+  const hasPrev=!!prevRow,showYoY=cardView[f.topic]==='yoy';
+  const isBaked=MV_DATA_BAKED[yr]?.[String(key)]?.[f.topic]!=null;
+
+  function ss(cur,prev){if(prev==null||isYoY)return'';const d=cur-prev;return`<div class="tc-stat-sub">${prev} in '25 <span class="${acls(d)}">${arr(d)}</span></div>`;}
+  function sd(cur,prev){if(prev==null||isYoY||cur-prev===0)return'';const d=cur-prev;return`<div class="tc-stat-delta ${acls(d)}">${sgn(d)}${d}</div>`;}
+  function bd(cur,prev){if(prev==null||isYoY)return'';const d=(cur-prev)*100;return`<span class="bar-delta ${acls(d)}">${arr(d)} ${sgn(d)}${d.toFixed(1)}pp</span>`;}
+
+  const mvHtml=`<div class="mv-section">
+    <div class="mv-input-row">
+      <span class="mv-label">Menzis+VGZ</span>
+      <input class="mv-input" type="number" min="0" placeholder="—" value="${mv!=null?mv:''}"
+        oninput="setMV('${yr}','${key}','${f.topic}',this.value)"
+        aria-label="Menzis en VGZ ${f.topic} ${isYoY?'2025':'2026'}">
+    </div>
+    ${isBaked?`<div class="mv-saved">✓ Synced via Supabase</div>`:''}
+    ${ppfMV!=null?`<div class="bar-row">
+      <span class="bar-type" style="color:var(--purple)">PF gecorr.</span>
+      <div class="bar-track">
+        <div class="bar-fill" style="width:${Math.min(100,ppfMV*100).toFixed(1)}%;background:var(--purple)"></div>
+        ${!isYoY&&pPpfMV!=null?`<div class="bar-fill-prev" style="width:${Math.min(100,pPpfMV*100).toFixed(1)}%;background:var(--purple)"></div>`:''}
+      </div>
+      <span class="bar-pct" style="color:var(--purple)">${pp(ppfMV)}${!isYoY&&pPpfMV!=null?`<span class="bar-delta ${acls((ppfMV-pPpfMV)*100)}">${arr((ppfMV-pPpfMV)*100)} ${sgn((ppfMV-pPpfMV)*100)}${((ppfMV-pPpfMV)*100).toFixed(1)}pp</span>`:''}</span>
+    </div>`:''}
+  </div>`;
+
+  return`<div class="tc">
+    <div class="tc-name"><span class="tc-dot"></span>${cap(f.topic)}</div>
+    ${hasPrev?`<div class="yoy-toggle">
+      <button class="yoy-btn ${!showYoY?'active':''}" onclick="setView('${f.topic}','cur')">2026</button>
+      <button class="yoy-btn ${showYoY?'active':''}" onclick="setView('${f.topic}','yoy')">2025</button>
+    </div>`:''}
+    <div class="tc-counts">
+      <div class="tc-stat"><div class="tc-stat-val">${df.totaal}</div><div class="tc-stat-lbl">Totaal</div>${ss(f.totaal,prevRow?.totaal)}${sd(f.totaal,prevRow?.totaal)}</div>
+      <div class="tc-stat"><div class="tc-stat-val">${df.csi}</div><div class="tc-stat-lbl">CSI=009</div>${ss(f.csi,prevRow?.csi)}${sd(f.csi,prevRow?.csi)}</div>
+      <div class="tc-stat"><div class="tc-stat-val">${df.zorgplan}</div><div class="tc-stat-lbl">Zorgplan</div>${ss(f.zorgplan,prevRow?.zorgplan)}${sd(f.zorgplan,prevRow?.zorgplan)}</div>
+      <div class="tc-stat"><div class="tc-stat-val">${df.pf}</div><div class="tc-stat-lbl">Prod.fin.</div>${ss(f.pf,prevRow?.pf)}${sd(f.pf,prevRow?.pf)}</div>
+    </div>
+    <div class="tc-bars">
+      <div class="bar-row"><span class="bar-type">Zorgplan</span>
+        <div class="bar-track">
+          <div class="bar-fill" style="width:${((dPzp||0)*100).toFixed(1)}%;background:#1A6EBF"></div>
+          ${!isYoY&&pPzp!=null?`<div class="bar-fill-prev" style="width:${(pPzp*100).toFixed(1)}%;background:#1A6EBF"></div>`:''}
+        </div>
+        <span class="bar-pct">${dPzp!=null?pp(dPzp):'—'}${bd(pzp,pPzp)}</span>
+      </div>
+      <div class="bar-row"><span class="bar-type">Productfin.</span>
+        <div class="bar-track">
+          <div class="bar-fill" style="width:${((dPpf||0)*100).toFixed(1)}%;background:#1A7A52"></div>
+          ${!isYoY&&pPpf!=null?`<div class="bar-fill-prev" style="width:${(dPpf*100).toFixed(1)}%;background:#1A7A52"></div>`:''}
+        </div>
+        <span class="bar-pct">${dPpf!=null?pp(dPpf):'—'}${bd(ppf,pPpf)}</span>
+      </div>
+      ${mvHtml}
+    </div>
+    <div class="risk-strip">
+      <div class="rs-l" style="flex:${dLw||0}"></div>
+      <div class="rs-m" style="flex:${dMd||0}"></div>
+      <div class="rs-h" style="flex:${dHi||0}"></div>
+    </div>
+    <div class="risk-mini">
+      <span><span class="rdot" style="background:#5A9E2F"></span>Low ${dLw}%</span>
+      <span><span class="rdot" style="background:#C4870D"></span>Med ${dMd}%</span>
+      <span><span class="rdot" style="background:#CC3333"></span>High ${dHi}%</span>
+    </div>
+  </div>`;
+}
+
+function renderTopicsOnly(){
+  const rows=getRows(curKey),prevRows=getRows(curKey,DATA_PREV);
+  document.getElementById('sec-label-topics').textContent=getLabel(curKey)+' — per ZorgTopic';
+  document.getElementById('topic-grid').innerHTML=rows.map(f=>buildCard(f,cardView[f.topic]==='yoy',prevRows.find(p=>p.topic===f.topic)||null,curKey)).join('');
+}
+function setView(topic,view){cardView[topic]=view;renderTopicsOnly();}
+
+function renderRisk(rows,prevRows){
+  const hasPrev=prevRows&&prevRows.length>0;
+  function rt(rrows){
+    if(!rrows||!rrows.length)return`<div class="no-prev">Geen data beschikbaar</div>`;
+    const t=totals(rrows);
+    return`<table class="rtable"><thead><tr><th>ZorgTopic</th><th class="r">PF-traj.</th><th class="r">Low</th><th class="r">Medium</th><th class="r">High</th></tr></thead>
+      <tbody>${rrows.map(f=>`<tr><td>${cap(f.topic)}</td><td class="r">${f.pf}</td>
+        <td class="r"><span class="badge bl">${pp(f.low)}</span></td>
+        <td class="r"><span class="badge bm">${pp(f.med)}</span></td>
+        <td class="r"><span class="badge bh">${pp(f.high)}</span></td></tr>`).join('')}
+      <tr><td>Totaal</td><td class="r">${t.pf}</td>
+        <td class="r"><span class="badge bl">${pp(t.low)}</span></td>
+        <td class="r"><span class="badge bm">${pp(t.med)}</span></td>
+        <td class="r"><span class="badge bh">${pp(t.high)}</span></td></tr></tbody></table>`;
+  }
+  document.getElementById('risk-wrap').innerHTML=`
+    <div class="risk-inner-tabs">
+      <button class="rit-btn ${riskTab==='2026'?'active':''}" onclick="switchRiskTab('2026')">2026</button>
+      ${hasPrev?`<button class="rit-btn ${riskTab==='2025'?'active':''}" onclick="switchRiskTab('2025')">2025</button>`:''}
+    </div>
+    <div class="risk-pane active" id="rp-2026">${rt(rows)}</div>
+    ${hasPrev?`<div class="risk-pane ${riskTab==='2025'?'active':''}" id="rp-2025">${rt(prevRows)}</div>`:''}`;
+}
+function switchRiskTab(tab){
+  riskTab=tab;
+  document.querySelectorAll('.rit-btn').forEach(b=>b.classList.toggle('active',b.textContent===tab));
+  document.querySelectorAll('.risk-pane').forEach(p=>p.classList.remove('active'));
+  const el=document.getElementById('rp-'+tab);if(el)el.classList.add('active');
+}
+
+function targetPlugin(){
+  return{id:'tl',beforeDraw(chart){
+    const{ctx,chartArea:{left,right},scales:{y}}=chart;if(!y)return;
+    const yp=y.getPixelForValue(TARGET);
+    ctx.save();ctx.strokeStyle='#E8880A';ctx.lineWidth=1.5;ctx.setLineDash([6,4]);ctx.globalAlpha=.8;
+    ctx.beginPath();ctx.moveTo(left,yp);ctx.lineTo(right,yp);ctx.stroke();ctx.restore();
+  }};
+}
+Chart.register(targetPlugin());
+
+function chartOpts(){
+  return{responsive:true,maintainAspectRatio:false,
+    plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.dataset.label+': '+c.parsed.y+'%'}},tl:{}},
+    scales:{y:{min:0,max:100,ticks:{callback:v=>v+'%',font:{size:10},color:'#9E9B94'},grid:{color:'rgba(0,0,0,.05)'},border:{display:false}},
+      x:{ticks:{font:{size:10},color:'#9E9B94',autoSkip:false},grid:{display:false},border:{display:false}}}};
+}
+function legH(){
+  return TOPICS.map((t,i)=>`<span class="cl"><span class="cl-sq" style="background:${PAL[i]}"></span>${cap(t)}</span>`).join('')+
+    `<span class="cl"><span style="display:inline-block;width:14px;height:0;border-top:2px dashed var(--target);vertical-align:middle;margin-right:2px"></span><span style="color:var(--target)">80%</span></span>`;
+}
+
+let czp=null,cpf=null,cmv=null,cmulti=null;
+
+
+
+function renderMT(){
+  renderMTNav();
+  const key=curMTKey;
+  const rows=getRows(key),prevRows=getRows(key,DATA_PREV);
+  const hasPrev=prevRows&&prevRows.length>0;
+  const avail=Object.keys(DATA).map(Number).filter(n=>!isNaN(n)).sort((a,b)=>a-b);
+  const curMNum=typeof key==='number'?key:null;
+  const prevMNum=curMNum!=null?avail[avail.indexOf(curMNum)-1]:null;
+  const prevMRows=prevMNum!=null?getRows(prevMNum):null;
+  const t=totals(rows),p=hasPrev?totals(prevRows):null;
+  const periodLabel=getLabel(key)+' '+new Date().getFullYear();
+
+  function zpCard(f,pr,pm){
+    const pzp=f.totaal?f.zorgplan/f.totaal:0;
+    const pPzp=pr&&pr.totaal?pr.zorgplan/pr.totaal:null;
+    const pmPzp=pm&&pm.totaal?pm.zorgplan/pm.totaal:null;
+    const hit=pzp*100>=TARGET;
+    return`<div class="a-card">
+      <div class="a-card-topic">${cap(f.topic)}</div>
+      <div class="a-metric"><span class="a-metric-label">Huidig</span>
+        <div class="a-metric-right"><span class="a-val ${hit?'hit':'miss'}">${pp(pzp)}</span><span style="font-size:10px;margin-left:3px">${hit?'✓':'✗'}</span></div></div>
+      ${pPzp!=null?`<div class="a-metric"><span class="a-metric-label">vs 2025</span><div class="a-metric-right">${apill((pzp-pPzp)*100,'pp')}</div></div>`:''}
+      ${pmPzp!=null?`<div class="a-metric"><span class="a-metric-label">vs ${MONTHS[prevMNum].short}</span><div class="a-metric-right">${apill((pzp-pmPzp)*100,'pp')}</div></div>`:''}
+      <div class="a-divider"></div>
+      <div class="a-metric"><span class="a-metric-label" style="color:var(--text3)">${f.zorgplan} van ${f.totaal} traj.</span></div>
+    </div>`;
+  }
+  function totaalZPCard(){
+    const hit=t.pzp*100>=TARGET;
+    return`<div class="a-card total">
+      <div class="a-card-topic">Totaal</div>
+      <div class="a-metric"><span class="a-metric-label">Huidig</span>
+        <div class="a-metric-right"><span class="a-val ${hit?'hit':'miss'}">${pp(t.pzp)}</span><span style="font-size:10px;margin-left:3px">${hit?'✓':'✗'}</span></div></div>
+      ${p?`<div class="a-metric"><span class="a-metric-label">vs 2025</span><div class="a-metric-right">${apill((t.pzp-p.pzp)*100,'pp')}</div></div>`:''}
+      <div class="a-divider"></div>
+      <div class="a-metric"><span class="a-metric-label" style="color:var(--text3)">${t.zorgplan} van ${t.totaal} traj.</span></div>
+    </div>`;
+  }
+
+  function pfCard(f,pr,pm){
+    const ppf=f.csi?f.pf/f.csi:0;
+    const pPpf=pr&&pr.csi?pr.pf/pr.csi:null;
+    const mv=getMV('cur',key,f.topic),ppfMV=mv!=null&&mv>0?f.pf/mv:null;
+    const pMV=getMV('prev',key,f.topic),pPpfMV=pMV!=null&&pMV>0&&pr?pr.pf/pMV:null;
+    const hitMV=ppfMV!=null&&ppfMV*100>=TARGET;
+    return`<div class="a-card">
+      <div class="a-card-topic">${cap(f.topic)}</div>
+      <div class="a-metric"><span class="a-metric-label">PF totaal</span>
+        <div class="a-metric-right"><span class="a-val">${pp(ppf)}</span>${pPpf!=null?apill((ppf-pPpf)*100,'pp'):''}</div></div>
+      <div class="a-metric"><span class="a-metric-label" style="color:var(--purple)">PF gecorr.</span>
+        <div class="a-metric-right">
+          ${ppfMV!=null?`<span class="a-val ${hitMV?'hit':'miss'}" style="color:var(--purple)">${pp(ppfMV)}</span><span style="font-size:10px;margin-left:3px">${hitMV?'✓':'✗'}</span>${pPpfMV!=null?apill((ppfMV-pPpfMV)*100,'pp'):''}`:
+          `<span style="font-size:11px;color:var(--text3);font-style:italic">—</span>`}
+        </div></div>
+      <div class="a-divider"></div>
+      <div class="a-metric"><span class="a-metric-label" style="color:var(--text3)">${f.pf} PF van ${f.csi} CSI</span></div>
+    </div>`;
+  }
+  function totaalPFCard(){
+    const corrCur=getWeightedCorrPF(key,'cur'),corrPrev=getWeightedCorrPF(key,'prev');
+    const hitMV=corrCur!=null&&corrCur*100>=TARGET;
+    return`<div class="a-card total">
+      <div class="a-card-topic">Totaal</div>
+      <div class="a-metric"><span class="a-metric-label">PF totaal</span>
+        <div class="a-metric-right"><span class="a-val">${pp(t.ppf)}</span>${p?apill((t.ppf-p.ppf)*100,'pp'):''}</div></div>
+      <div class="a-metric"><span class="a-metric-label" style="color:var(--purple)">PF gecorr.</span>
+        <div class="a-metric-right">
+          ${corrCur!=null?`<span class="a-val ${hitMV?'hit':'miss'}" style="color:var(--purple)">${pp(corrCur)}</span><span style="font-size:10px;margin-left:3px">${hitMV?'✓':'✗'}</span>${corrPrev!=null?apill((corrCur-corrPrev)*100,'pp'):''}`:
+          `<span style="font-size:11px;color:var(--text3);font-style:italic">—</span>`}
+        </div></div>
+      <div class="a-divider"></div>
+      <div class="a-metric"><span class="a-metric-label" style="color:var(--text3)">${t.pf} PF van ${t.csi} CSI</span></div>
+    </div>`;
+  }
+
+  function riskCard(f,pr){
+    const colors=['#5A9E2F','#C4870D','#CC3333'];
+    const keys=['low','med','high'],lbls=['Low','Med','High'];
+    const bars=keys.map((k,i)=>{
+      const val=(f[k]||0)*100,dPrev=pr?((f[k]||0)-(pr[k]||0))*100:null;
+      return`<div class="risk-bar-row">
+        <span class="risk-bar-lbl" style="color:${colors[i]}">${lbls[i]}</span>
+        <div class="risk-bar-track"><div class="risk-bar-fill" style="width:${val.toFixed(1)}%;background:${colors[i]}"></div></div>
+        <span class="risk-bar-val">${val.toFixed(0)}%</span>
+        ${dPrev!=null?`<span class="risk-bar-delta ${acls(dPrev)}">${sgn(dPrev)}${Math.abs(dPrev).toFixed(0)}pp</span>`:'<span class="risk-bar-delta"></span>'}
+      </div>`;
+    }).join('');
+    return`<div class="a-card">
+      <div class="a-card-topic">${cap(f.topic)} <span style="font-weight:400;color:var(--text3)">(${f.pf} PF)</span></div>
+      <div class="risk-bars">${bars}</div>
+      ${pr?`<div class="a-divider"></div><div style="font-size:10px;color:var(--text3)">Δ t.o.v. 2025</div>`:''}
+    </div>`;
+  }
+  function totaalRiskCard(){
+    const colors=['#5A9E2F','#C4870D','#CC3333'];
+    const keys=['low','med','high'],lbls=['Low','Med','High'];
+    const bars=keys.map((k,i)=>{
+      const val=(t[k]||0)*100,dPrev=p?((t[k]||0)-(p[k]||0))*100:null;
+      return`<div class="risk-bar-row">
+        <span class="risk-bar-lbl" style="color:${colors[i]}">${lbls[i]}</span>
+        <div class="risk-bar-track"><div class="risk-bar-fill" style="width:${val.toFixed(1)}%;background:${colors[i]}"></div></div>
+        <span class="risk-bar-val">${val.toFixed(0)}%</span>
+        ${dPrev!=null?`<span class="risk-bar-delta ${acls(dPrev)}">${sgn(dPrev)}${Math.abs(dPrev).toFixed(0)}pp</span>`:'<span class="risk-bar-delta"></span>'}
+      </div>`;
+    }).join('');
+    return`<div class="a-card total"><div class="a-card-topic">Totaal <span style="font-weight:400;color:var(--text3)">(${t.pf} PF)</span></div><div class="risk-bars">${bars}</div>${p?`<div class="a-divider"></div><div style="font-size:10px;color:var(--text3)">Δ t.o.v. 2025</div>`:''}</div>`;
+  }
+
+  const scoreRows=rows.map(f=>{
+    const pzp=f.totaal?f.zorgplan/f.totaal:0,ppf=f.csi?f.pf/f.csi:0;
+    const pr=hasPrev?prevRows.find(r=>r.topic===f.topic):null;
+    const pPzp=pr&&pr.totaal?pr.zorgplan/pr.totaal:null,pPpf=pr&&pr.csi?pr.pf/pr.csi:null;
+    const mv=getMV('cur',key,f.topic),ppfMV=mv!=null&&mv>0?f.pf/mv:null;
+    const pMV=getMV('prev',key,f.topic),pPpfMV=pMV!=null&&pMV>0&&pr?pr.pf/pMV:null;
+    function tgt(v){return v*100>=TARGET?`<span class="above-t">${pp(v)} ✓</span>`:`<span class="below-t">${pp(v)} ✗</span>`;}
+    return`<tr><td class="b">${cap(f.topic)}</td><td class="r">${f.totaal}</td>
+      <td class="r">${tgt(pzp)} ${pPzp!=null?dpill((pzp-pPzp)*100,'pp'):''}</td>
+      <td class="r">${pp(ppf)} ${pPpf!=null?dpill((ppf-pPpf)*100,'pp'):''}</td>
+      <td class="r">${ppfMV!=null?tgt(ppfMV)+' '+(pPpfMV!=null?dpill((ppfMV-pPpfMV)*100,'pp'):''):'<span style="color:var(--text3)">—</span>'}</td>
+      <td class="r"><span class="badge bl">${pp(f.low)}</span> <span class="badge bm">${pp(f.med)}</span> <span class="badge bh">${pp(f.high)}</span></td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('mt-content').innerHTML=`
+    <div class="theme-section">
+      <div class="mt-table-wrap">
+        <div class="mt-table-title">Scorekaart ${periodLabel} <span class="target-badge" style="margin-left:8px">Streef: ${TARGET}%</span></div>
+        <table class="mt-table"><thead><tr>
+          <th>ZorgTopic</th><th class="r">Traj.</th>
+          <th class="r">Incl. % zorgplan</th><th class="r">Incl. % PF</th>
+          <th class="r">Incl. % PF gecorr.</th><th class="r">Risico L / M / H</th>
+        </tr></thead><tbody>${scoreRows}</tbody></table>
+        <div class="mt-note">✓ = boven ${TARGET}% · ✗ = onder ${TARGET}% · Δ t.o.v. ${hasPrev?getLabel(key)+' 2025':'2025 (geen data)'} · Streef geldt voor zorgplan en gecorr. PF</div>
+      </div>
+    </div>
+    <div class="theme-section">
+      <div class="theme-title"><span style="font-size:15px">📋</span>1. Inclusiepercentages zorgplan</div>
+      <div class="analysis-grid">
+        ${rows.map(f=>zpCard(f,hasPrev?prevRows.find(r=>r.topic===f.topic):null,prevMRows?prevMRows.find(r=>r.topic===f.topic):null)).join('')}
+        ${totaalZPCard()}
+      </div>
+    </div>
+    <div class="theme-section">
+      <div class="theme-title"><span style="font-size:15px">💊</span>2. Inclusiepercentages productfinanciering</div>
+      <div class="analysis-grid">
+        ${rows.map(f=>pfCard(f,hasPrev?prevRows.find(r=>r.topic===f.topic):null,prevMRows?prevMRows.find(r=>r.topic===f.topic):null)).join('')}
+        ${totaalPFCard()}
+      </div>
+    </div>
+    <div class="theme-section">
+      <div class="theme-title"><span style="font-size:15px">📊</span>3. Risicoverdeling</div>
+      <div class="analysis-grid">
+        ${rows.map(f=>riskCard(f,hasPrev?prevRows.find(r=>r.topic===f.topic):null)).join('')}
+        ${totaalRiskCard()}
+      </div>
+      <div style="margin-top:8px;font-size:11px;color:var(--text3);padding:8px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--rsm)">Δ t.o.v. ${hasPrev?getLabel(key)+' 2025':prevMNum?MONTHS[prevMNum].label+' 2026':'vorige periode'} · Weergave is feitelijk, zonder waardeoordeel</div>
     </div>`;
 }
 
-// ── BESTAND SELECTIE EN VERWERKING ──────────────────────────────────────────
-const selectedFiles = { 'lage rug': null, 'nek': null, 'schouder': null };
 
+async function loadDataFromSupabase() {
+  try {
+    const r = await fetch(`${SB_URL}/${DATA_TABLE}?select=*`, { headers: SB_HDR });
+    if (!r.ok) return; // stil falen, ingebakken data blijft
+    const rows = await r.json();
+    if (!rows.length) return;
+    // Bouw DATA en DATA_PREV opnieuw op vanuit Supabase
+    // Behoud ingebakken data voor maanden die NIET in DB staan
+    rows.forEach(row => {
+      const target = row.jaar === 2025 ? DATA_PREV : DATA;
+      const mk = isNaN(row.maand) ? row.maand : parseInt(row.maand);
+      if (!target[mk]) target[mk] = [];
+      target[mk] = target[mk].filter(r => r.topic !== row.topic);
+      target[mk].push({
+        topic: row.topic,
+        totaal: row.totaal,
+        csi: row.csi,
+        zorgplan: row.zorgplan,
+        pf: row.pf,
+        low: row.low,
+        med: row.med,
+        high: row.high
+      });
+    });
+    // Zet curKey op meest recente maand (numeriek, geen kwartaal)
+    const numKeys = Object.keys(DATA).map(Number).filter(k => !isNaN(k)).sort((a,b)=>b-a);
+    if (numKeys.length) curKey = numKeys[0];
+    render(); renderCharts(); if(mainTab==='mt') renderMT();
+  } catch(e) {
+    console.warn('Data laden mislukt:', e);
+  }
+}
+
+async function saveDataRow(jaar, maand, topic, vals) {
+  const id = jaar + '_' + maand + '_' + topic.replace(' ', '_');
+  const r = await fetch(`${SB_URL}/${DATA_TABLE}`, {
+    method: 'POST',
+    headers: { ...SB_HDR, 'Prefer': 'resolution=merge-duplicates' },
+    body: JSON.stringify({ id, jaar, maand, topic, ...vals, updated_at: new Date().toISOString() })
+  });
+  if (!r.ok) { const t = await r.text(); throw new Error('HTTP ' + r.status + ': ' + t); }
+}
+
+// ── EXCEL PARSER ─────────────────────────────────────────────────────────────
+// Parst een ZorgTopics Excel file (SheetJS) naar een data-object
+function parseZorgTopicsExcel(arrayBuffer) {
+  // Minimale XLSX parser voor de vaste structuur: rij 1 = headers, rij 2 = data
+  // We lezen alleen de data-rij (rij index 1, 0-based)
+  // Kolommen: totaal, csi, zorgplan, pf_abs, pf_pct, low, med, high
+  const dv = new DataView(arrayBuffer);
+  // Gebruik SheetJS via CDN (laden we dynamisch)
+  return null; // wordt vervangen door echte parser na SheetJS laden
+}
+
+// ── BEHEER RENDER ────────────────────────────────────────────────────────────
+let beheerState = {
+  preview: null,
+  saving: false,
+  savedMsg: '',
+  uploadErr: '',
+  sheetJSLoaded: false,
+  uploadLog: {},   // { "2026_4": { topics: ['lage rug','nek','schouder'], ts: '...' }, ... }
+};
+
+// Laad uploadlog uit Supabase
+async 
 function prefillUpload(jaar, maand) {
   // Scroll naar upload sectie en selecteer jaar/maand
   document.getElementById('bh-jaar').value = String(jaar);
