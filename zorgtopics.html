@@ -905,7 +905,10 @@ function renderBeheer() {
 
   // ── SECTIE 0: Uploadstatus per jaar ────────────────────────────────────
   const log = s.uploadLog || {};
-  const jaren = [2025, 2026];
+  // Dynamisch: van volgend jaar t/m 2025 (nieuwste bovenaan)
+  const thisYear = new Date().getFullYear();
+  const jaren = [];
+  for (let y = thisYear + 1; y >= 2025; y--) jaren.push(y);
   const currentYear = new Date().getFullYear();
   let statusHTML = '<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:20px;margin-bottom:20px;box-shadow:var(--sh)">';
   statusHTML += '<div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:16px">📋 Uploadstatus per jaar</div>';
@@ -961,8 +964,7 @@ function renderBeheer() {
         <div>
           <label style="font-size:12px;font-weight:500;color:var(--text2);display:block;margin-bottom:4px">Jaar</label>
           <select id="bh-jaar" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:var(--rsm);font-family:'DM Sans',sans-serif;font-size:13px;background:var(--surface)">
-            <option value="2026">2026 (huidig jaar)</option>
-            <option value="2025">2025 (vorig jaar)</option>
+            ${(()=>{const cy=new Date().getFullYear();const opts=[];for(let y=cy+1;y>=2025;y--){opts.push(`<option value="${y}" ${y===cy?'selected':''} >${y}${y===cy?' (huidig jaar)':y===cy-1?' (vorig jaar)':y===cy+1?' (volgend jaar)':''}</option>`);}return opts.join('');})()}
           </select>
         </div>
         <div>
