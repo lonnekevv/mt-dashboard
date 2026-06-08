@@ -392,7 +392,7 @@ function getWeightedCorrPF(key,yr){
 function getLabel(key){
   if(typeof key==='number')return MONTHS[key].label;
   const qn=parseInt(key[1]),avail=Object.keys(DATA).map(Number).filter(m=>MONTHS[m].q===qn).sort((a,b)=>a-b);
-  return key+(avail.length?' ('+avail.map(m=>MONTHS[m].short).join('–')+')':'');
+  const filtAvail=avail.filter(m=>MONTHS[m]);return key+(filtAvail.length?' ('+filtAvail.map(m=>MONTHS[m].short).join('–')+')':'');
 }
 
 function buildNavItems(){
@@ -605,7 +605,7 @@ function legH(){
 }
 
 function renderCharts(){
-  const avail=Object.keys(DATA).map(Number).sort((a,b)=>a-b),labels=avail.map(m=>MONTHS[m].short);
+  const avail=Object.keys(DATA).map(Number).filter(n=>!isNaN(n)).sort((a,b)=>a-b),labels=avail.map(m=>MONTHS[m].short);
   const makeDS=g=>TOPICS.map((t,i)=>({label:cap(t),data:avail.map(m=>{const f=DATA[m]?.find(d=>d.topic===t);return f?parseFloat((g(f)*100).toFixed(1)):null;}),borderColor:PAL[i],backgroundColor:'transparent',borderWidth:2,pointRadius:4,pointBackgroundColor:PAL[i],tension:.3,spanGaps:true,borderDash:DASHES[i]}));
   const mvDS=TOPICS.map((t,i)=>({label:cap(t),data:avail.map(m=>{const f=DATA[m]?.find(d=>d.topic===t);const mv=getMV('cur',m,t);if(!f||mv==null||mv<=0)return null;return parseFloat((f.pf/mv*100).toFixed(1));}),borderColor:PAL[i],backgroundColor:'transparent',borderWidth:2,pointRadius:4,pointBackgroundColor:PAL[i],tension:.3,spanGaps:true,borderDash:DASHES[i]}));
   const hasMV=mvDS.some(d=>d.data.some(v=>v!=null));
@@ -643,7 +643,7 @@ function renderMT(){
   const key=curMTKey;
   const rows=getRows(key),prevRows=getRows(key,DATA_PREV);
   const hasPrev=prevRows&&prevRows.length>0;
-  const avail=Object.keys(DATA).map(Number).sort((a,b)=>a-b);
+  const avail=Object.keys(DATA).map(Number).filter(n=>!isNaN(n)).sort((a,b)=>a-b);
   const curMNum=typeof key==='number'?key:null;
   const prevMNum=curMNum!=null?avail[avail.indexOf(curMNum)-1]:null;
   const prevMRows=prevMNum!=null?getRows(prevMNum):null;
@@ -903,48 +903,53 @@ function renderBeheer() {
   const s = beheerState;
   const maandNamen = Object.fromEntries(Object.entries(MONTHS).map(([k,v])=>[k,v.label]));
 
-  // ── SECTIE 0: Uploadstatus ───────────────────────────────────────────────
+  // ── SECTIE 0: Uploadstatus per jaar ────────────────────────────────────
   const log = s.uploadLog || {};
-  const logEntries = Object.values(log).sort((a,b) => b.jaar - a.jaar || b.maand - a.maand);
-  let statusHTML = '';
-  if (logEntries.length > 0) {
-    const rows = logEntries.map(e => {
-      const mNaam = maandNamen[e.maand] || e.maand;
-      const allTopics = e.topics.length >= 3;
-      const ts = new Date(e.ts).toLocaleDateString('nl-NL', {day:'numeric',month:'long',year:'numeric'});
-      return `<tr style="border-bottom:1px solid var(--border)">
-        <td style="padding:8px 10px;font-weight:500">${mNaam} ${e.jaar}</td>
-        <td style="padding:8px 10px">
-          ${['lage rug','nek','schouder'].map(t =>
-            `<span style="display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;margin-right:3px;
-              background:${e.topics.includes(t)?'#e6f4ec':'var(--surface2)'};
-              color:${e.topics.includes(t)?'#1a7a4a':'var(--text3)'}">
-              ${e.topics.includes(t)?'✓':'–'} ${t}</span>`
-          ).join('')}
-        </td>
-        <td style="padding:8px 10px;font-size:11px;color:var(--text3)">${ts}</td>
-        <td style="padding:8px 10px">
-          <span style="font-size:11px;color:var(--text2);cursor:pointer;text-decoration:underline"
-            onclick="prefillUpload(${e.jaar},${e.maand})">Vervangen</span>
-        </td>
-      </tr>`;
-    }).join('');
-    statusHTML = `
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:20px;margin-bottom:20px;box-shadow:var(--sh)">
-        <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:14px">✅ Geüploade maanden</div>
-        <div style="overflow-x:auto">
-          <table style="width:100%;border-collapse:collapse;font-size:12px">
-            <thead><tr style="background:var(--surface2)">
-              <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);font-weight:500;color:var(--text2)">Periode</th>
-              <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);font-weight:500;color:var(--text2)">Bestanden</th>
-              <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);font-weight:500;color:var(--text2)">Laatste update</th>
-              <th style="padding:8px 10px;border-bottom:1px solid var(--border)"></th>
-            </tr></thead>
-            <tbody>${rows}</tbody>
-          </table>
+  const jaren = [2025, 2026];
+  const currentYear = new Date().getFullYear();
+  let statusHTML = '<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:20px;margin-bottom:20px;box-shadow:var(--sh)">';
+  statusHTML += '<div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:16px">📋 Uploadstatus per jaar</div>';
+
+  jaren.forEach(jaar => {
+    const maandRijen = Object.values(MONTHS).map((m, i) => {
+      const maandNr = i + 1;
+      const key = jaar + '_' + maandNr;
+      const entry = log[key];
+      const volledig = entry && entry.topics.length >= 3;
+      const gedeeltelijk = entry && entry.topics.length > 0 && entry.topics.length < 3;
+      const ts = entry ? new Date(entry.ts).toLocaleDateString('nl-NL', {day:'numeric', month:'short'}) : null;
+      return { maandNr, label: m.short, volledig, gedeeltelijk, ts, entry };
+    });
+
+    const aantalVolledig = maandRijen.filter(r => r.volledig).length;
+    const jaarKleur = aantalVolledig === 12 ? '#1a7a4a' : aantalVolledig > 0 ? '#b45309' : 'var(--text3)';
+
+    statusHTML += `
+      <div style="margin-bottom:20px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+          <div style="font-size:13px;font-weight:600;color:var(--text)">${jaar}</div>
+          <div style="font-size:11px;color:${jaarKleur};font-weight:500">${aantalVolledig}/12 maanden geüpload</div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:6px">
+          ${maandRijen.map(r => `
+            <div style="border:1px solid ${r.volledig ? '#b2dfc5' : r.gedeeltelijk ? '#f0c090' : 'var(--border)'};
+              border-radius:6px;padding:7px 8px;
+              background:${r.volledig ? '#e6f4ec' : r.gedeeltelijk ? '#fef3dc' : 'var(--surface2)'};
+              text-align:center;">
+              <div style="font-size:12px;font-weight:600;color:${r.volledig ? '#1a7a4a' : r.gedeeltelijk ? '#b45309' : 'var(--text2)'}">
+                ${r.volledig ? '✓' : r.gedeeltelijk ? '◑' : '–'} ${r.label}
+              </div>
+              ${r.ts ? `<div style="font-size:9px;color:var(--text3);margin-top:2px">${r.ts}</div>` : ''}
+              ${r.entry ? `<div style="font-size:9px;color:var(--text3);cursor:pointer;text-decoration:underline;margin-top:2px"
+                onclick="prefillUpload(${jaar},${r.maandNr})">vervangen</div>` : ''}
+            </div>
+          `).join('')}
         </div>
       </div>`;
-  }
+  });
+
+  statusHTML += '<div style="font-size:11px;color:var(--text3)">✓ = volledig (3 bestanden) · ◑ = gedeeltelijk · – = nog niet geüpload</div>';
+  statusHTML += '</div>';
 
   // ── SECTIE 1: Excel upload ──────────────────────────────────────────────
   let uploadHTML = `
@@ -1052,7 +1057,7 @@ function buildMVInvoer() {
 
   let rows = '';
   availMonths.forEach(m => {
-    const mNaam = MONTHS[m].short;
+    const mNaam = MONTHS[m]?.short || m;
     rows += `<tr style="border-bottom:1px solid var(--border)">
       <td style="padding:7px 10px;font-weight:500;white-space:nowrap">${mNaam}</td>
       ${TOPICS.map(t => {
@@ -1168,7 +1173,7 @@ async function verwerkUpload() {
   }
 
   const jaar = parseInt(document.getElementById('bh-jaar').value);
-  const maand = parseInt(document.getElementById('bh-maand').value);
+  const maand = parseInt(document.getElementById('bh-maand').value, 10);
   const rows = [];
 
   for (const topic of TOPICS) {
@@ -1201,7 +1206,9 @@ async function verwerkUpload() {
 }
 
 async function slaDataOp() {
-  const { jaar, maand, rows } = beheerState.preview;
+  const { rows } = beheerState.preview;
+  const jaar = parseInt(beheerState.preview.jaar, 10);
+  const maand = parseInt(beheerState.preview.maand, 10);
   beheerState.saving = true;
   beheerState.savedMsg = '';
   renderBeheer();
@@ -1229,7 +1236,7 @@ async function slaDataOp() {
     render(); renderCharts(); if(mainTab==='mt') renderMT();
 
     beheerState.saving = false;
-    beheerState.savedMsg = '✓ Opgeslagen! ' + (MONTHS[maand]?.label || maand) + ' ' + jaar + ' is nu zichtbaar in het dashboard.';
+    beheerState.savedMsg = '✓ Opgeslagen! ' + (MONTHS[maand] ? MONTHS[maand].label : maand) + ' ' + jaar + ' is nu zichtbaar in het dashboard.';
     TOPICS.forEach(t => { selectedFiles[t] = null; });
     loadUploadLog(); // ververs de uploadstatus
     renderBeheer();
