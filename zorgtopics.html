@@ -415,6 +415,7 @@ function switchMainTab(tab){
   document.querySelectorAll('.mtab').forEach((b,i)=>b.classList.toggle('active',['data','mt','beheer'][i]===tab));
   document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active'));
   document.getElementById('tab-'+tab).classList.add('active');
+  if(tab==='data'){ render(); renderCharts(); }
   if(tab==='mt')renderMT();
   if(tab==='beheer')renderBeheer();
 }
@@ -813,11 +814,10 @@ async function loadDataFromSupabase() {
     // Behoud ingebakken data voor maanden die NIET in DB staan
     rows.forEach(row => {
       const target = row.jaar === 2025 ? DATA_PREV : DATA;
-      const m = row.maand;
-      if (!target[m]) target[m] = [];
-      // Verwijder bestaande rij voor dit topic en vervang
-      target[m] = target[m].filter(r => r.topic !== row.topic);
-      target[m].push({
+      const mk = isNaN(row.maand) ? row.maand : parseInt(row.maand);
+      if (!target[mk]) target[mk] = [];
+      target[mk] = target[mk].filter(r => r.topic !== row.topic);
+      target[mk].push({
         topic: row.topic,
         totaal: row.totaal,
         csi: row.csi,
@@ -828,6 +828,9 @@ async function loadDataFromSupabase() {
         high: row.high
       });
     });
+    // Zet curKey op meest recente maand (numeriek, geen kwartaal)
+    const numKeys = Object.keys(DATA).map(Number).filter(k => !isNaN(k)).sort((a,b)=>b-a);
+    if (numKeys.length) curKey = numKeys[0];
     render(); renderCharts(); if(mainTab==='mt') renderMT();
   } catch(e) {
     console.warn('Data laden mislukt:', e);
@@ -971,7 +974,8 @@ function renderBeheer() {
 }
 
 function buildMVInvoer() {
-  const availMonths = Object.keys(DATA).map(Number).sort((a,b)=>a-b);
+  // Altijd alle 12 maanden tonen, niet alleen maanden met data
+  const availMonths = Object.keys(MONTHS).map(Number).sort((a,b)=>a-b);
   const qGroups = {};
   availMonths.forEach(m => { const q='Q'+MONTHS[m].q; if(!qGroups[q])qGroups[q]=[]; qGroups[q].push(m); });
 
@@ -1142,6 +1146,8 @@ async function slaDataOp() {
     const q = MONTHS[maand]?.q;
     if (q) herberekeningKwartaal(jaar, q, target);
 
+    // Navigeer naar de zojuist opgeslagen maand
+    if (jaar !== 2025) curKey = maand;
     render(); renderCharts(); if(mainTab==='mt') renderMT();
 
     beheerState.saving = false;
