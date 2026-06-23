@@ -534,8 +534,8 @@ function MTTab() {
   const {weeks} = React.useContext(WeeksCtx);
   const sortedWeekKeys=useMemo(()=>Object.keys(weeks).sort().reverse(),[weeks]);
   const availableMonths=useMemo(()=>[...new Set(sortedWeekKeys.map(getMonthKey))].sort().reverse(),[sortedWeekKeys]);
-  const [mtMonth,setMtMonth] = useState(()=>{ const now=new Date(),y=now.getMonth()===0?now.getFullYear()-1:now.getFullYear(),m=now.getMonth()===0?12:now.getMonth(); return y+"-"+String(m).padStart(2,"0"); });
-  useEffect(()=>{ if(availableMonths.length&&!availableMonths.includes(mtMonth)) setMtMonth(availableMonths[0]); },[availableMonths]);
+  const [mtMonth,setMtMonth] = useState("");
+  useEffect(()=>{ if(availableMonths.length) setMtMonth(availableMonths[0]); },[availableMonths]);
 
   function getMonthData(mk) {
     if(!mk) return null;
@@ -586,14 +586,20 @@ function MTTab() {
   }
   function TrendLine({data,valueKey,color}) {
     if(data.length<2) return <div style={{fontSize:11,color:BRAND.textMuted,textAlign:"center",padding:"16px 0"}}>Min. 2 maanden nodig</div>;
-    const W=280,H=65,pad=8,vals=data.map(d=>d[valueKey]),mx=Math.max(...vals,1);
-    const pts=vals.map((v,i)=>[pad+(i/(data.length-1))*(W-pad*2),H-pad-(v/mx)*(H-pad*2)]);
+    const W=280,H=65,padTop=16,padBot=8,padSide=8;
+    const vals=data.map(d=>d[valueKey]),mx=Math.max(...vals,1);
+    const pts=vals.map((v,i)=>[padSide+(i/(data.length-1))*(W-padSide*2),padTop+(1-v/mx)*(H-padTop-padBot)]);
     const path=pts.map((p,i)=>(i===0?"M":"L")+p[0]+","+p[1]).join(" ");
-    const area="M"+pts[0][0]+","+H+" "+pts.map(p=>"L"+p[0]+","+p[1]).join(" ")+" L"+pts[pts.length-1][0]+","+H+" Z";
-    return <svg viewBox={"0 0 "+W+" "+H} style={{width:"100%",height:H}}>
+    const area="M"+pts[0][0]+","+(H+2)+" "+pts.map(p=>"L"+p[0]+","+p[1]).join(" ")+" L"+pts[pts.length-1][0]+","+(H+2)+" Z";
+    const totalH=H+14;
+    return <svg viewBox={"0 0 "+W+" "+totalH} style={{width:"100%",height:totalH,overflow:"visible"}}>
       <path d={area} fill={color} fillOpacity="0.12"/>
       <path d={path} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round"/>
-      {pts.map(([x,y],i)=><g key={i}><circle cx={x} cy={y} r="3" fill={color}/><text x={x} y={H-1} textAnchor="middle" fontSize="8" fill={BRAND.textMuted}>{data[i].label}</text><text x={x} y={y-5} textAnchor="middle" fontSize="8.5" fontWeight="600" fill={color}>{vals[i]}</text></g>)}
+      {pts.map(([x,y],i)=><g key={i}>
+        <circle cx={x} cy={y} r="3" fill={color}/>
+        <text x={x} y={H+12} textAnchor="middle" fontSize="8" fill={BRAND.textMuted}>{data[i].label}</text>
+        <text x={x} y={y-7} textAnchor="middle" fontSize="8.5" fontWeight="600" fill={color}>{vals[i]}</text>
+      </g>)}
     </svg>;
   }
   function MiniTrendBar({history}) {
