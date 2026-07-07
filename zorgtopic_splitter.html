@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ZorgTopic Splitter — per therapeut</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+:root{
+  --bg:#F7F6F3;--surface:#FFF;--surface2:#F0EEE9;
+  --border:#E4E1DA;--border2:#D4D0C8;
+  --text:#1A1917;--text2:#6B6860;--text3:#9E9B94;
+  --green:#1A7A52;--green-bg:#E6F4EE;
+  --red:#A02020;--red-bg:#FDECEC;
+  --amber:#B45309;--amber-bg:#FEF3DC;
+  --blue:#1A6EBF;--blue-bg:#E8F1FA;
+  --r:10px;--rsm:6px;
+  --sh:0 1px 3px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;min-height:100vh}
+.layout{max-width:920px;margin:0 auto;padding:28px 24px 60px}
+.back-link{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#2d6b55;text-decoration:none;margin-bottom:1.25rem;opacity:.8}
+.back-link:hover{opacity:1}
+.header{margin-bottom:22px}
+.header-top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.header h1{font-size:20px;font-weight:500;letter-spacing:-.3px;margin-bottom:3px}
+.header-sub{font-size:13px;color:var(--text2)}
+.logo-mark{font-family:'DM Mono',monospace;font-size:11px;font-weight:500;background:var(--text);color:var(--bg);padding:4px 10px;border-radius:4px;letter-spacing:.05em}
+
+.info-box{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px 18px;margin-bottom:22px;box-shadow:var(--sh)}
+.info-box summary{cursor:pointer;font-size:13px;font-weight:500;color:var(--text2);list-style:none;display:flex;align-items:center;gap:8px}
+.info-box summary::-webkit-details-marker{display:none}
+.info-box summary::before{content:'▸';font-size:11px;color:var(--text3);transition:transform .15s}
+.info-box[open] summary::before{transform:rotate(90deg)}
+.info-box-body{margin-top:12px;font-size:12.5px;color:var(--text2);line-height:1.7}
+.info-box-body ol,.info-box-body ul{margin:6px 0 6px 18px}
+.info-box-body code{font-family:'DM Mono',monospace;background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:1px 5px;font-size:11.5px}
+
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:20px;margin-bottom:18px;box-shadow:var(--sh)}
+.card-title{font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px;display:flex;align-items:center;gap:8px}
+.card-sub{font-size:12px;color:var(--text2);margin-bottom:16px}
+
+.dropzone{border:1.5px dashed var(--border2);border-radius:var(--rsm);padding:22px;text-align:center;cursor:pointer;background:var(--surface2);transition:all .15s}
+.dropzone:hover{border-color:var(--green);background:var(--green-bg)}
+.dropzone.dragover{border-color:var(--green);background:var(--green-bg)}
+.dropzone-icon{font-size:24px;margin-bottom:6px}
+.dropzone-text{font-size:12.5px;color:var(--text2)}
+.dropzone-text strong{color:var(--text)}
+.dropzone input{display:none}
+
+.filelist{margin-top:12px;display:flex;flex-direction:column;gap:6px}
+.fileitem{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--rsm);font-size:12.5px}
+.fileitem .fi-icon{font-size:15px}
+.fileitem .fi-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fileitem .fi-topic{font-family:'DM Mono',monospace;font-size:11px;padding:2px 8px;border-radius:20px;background:var(--blue-bg);color:var(--blue);white-space:nowrap}
+.fileitem .fi-remove{cursor:pointer;color:var(--text3);font-size:15px;padding:0 4px;line-height:1}
+.fileitem .fi-remove:hover{color:var(--red)}
+
+.btn{padding:9px 20px;border:none;border-radius:var(--rsm);font-size:13px;font-weight:500;cursor:pointer;font-family:'DM Sans',sans-serif;transition:opacity .15s}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn-primary{background:var(--green);color:#fff}
+.btn-secondary{background:var(--surface2);color:var(--text2);border:1px solid var(--border)}
+.btn-row{display:flex;gap:10px;align-items:center;margin-top:16px;flex-wrap:wrap}
+
+.msg{border-radius:var(--rsm);padding:9px 13px;font-size:12.5px;margin-top:12px}
+.msg.err{background:var(--red-bg);color:var(--red);border:1px solid #f5bbb7}
+.msg.warn{background:var(--amber-bg);color:var(--amber);border:1px solid #f5d98a}
+.msg.ok{background:var(--green-bg);color:var(--green);border:1px solid #b2dfc5}
+
+.log{background:var(--surface2);border:1px solid var(--border);border-radius:var(--rsm);padding:12px 14px;font-family:'DM Mono',monospace;font-size:11.5px;color:var(--text2);line-height:1.8;max-height:260px;overflow-y:auto;margin-top:14px;white-space:pre-wrap}
+.log .ok-line{color:var(--green)}
+.log .warn-line{color:var(--amber)}
+
+.results-table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:14px}
+.results-table th{padding:8px 12px;text-align:left;font-size:10.5px;font-weight:500;text-transform:uppercase;letter-spacing:.06em;color:var(--text3);background:var(--surface2);border-bottom:1px solid var(--border)}
+.results-table td{padding:9px 12px;border-bottom:1px solid var(--border)}
+.results-table tr:last-child td{border-bottom:none}
+.results-table .dl-link{color:var(--green);font-weight:500;text-decoration:none;font-size:12px}
+.results-table .dl-link:hover{text-decoration:underline}
+.tabs-mini{font-size:11px;color:var(--text3)}
+
+.spinner{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:-2px;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.footer{font-size:11px;color:var(--text3);margin-top:28px;text-align:right}
+</style>
+</head>
+<body>
+<div class="layout">
+  <a href="index.html" class="back-link">← MT Dashboard</a>
+
+  <div class="header">
+    <div class="header-top">
+      <div><h1>ZorgTopic Splitter</h1><div class="header-sub">Exportbestanden opsplitsen per therapeut</div></div>
+      <div class="logo-mark">ZORGTOPICS</div>
+    </div>
+  </div>
+
+  <details class="info-box">
+    <summary>Hoe werkt deze tool?</summary>
+    <div class="info-box-body">
+      <strong>Elk kwartaal:</strong>
+      <ol>
+        <li>Upload de klinimetrie-exports (lage rug, nek, schouder) hieronder</li>
+        <li>Upload de declaratie-exports (lage rug, nek, schouder) hieronder</li>
+        <li>Klik op <em>Verwerken</em></li>
+        <li>Download de bestanden per therapeut, los of als zip</li>
+      </ol>
+      <strong>Wat de tool doet:</strong>
+      <ul>
+        <li>Herkent automatisch het zorggebied (lage rug / nek / schouder) op basis van de bestandsnaam</li>
+        <li>Splitst per therapeut op in een eigen Excel-bestand</li>
+        <li>Kleurt cellen automatisch rood: bij klinimetrie als de waarde <code>X</code> is; bij declaraties als er bij <em>DOC eerste behandeling</em> een startcode staat én <em>F-Code = SBST</em> "nee" is</li>
+        <li>Tabbladvolgorde: Klinimetrie lage rug → Declaratie lage rug → Klinimetrie nekpijn → Declaratie nekpijn → Klinimetrie schouderpijn → Declaratie schouderpijn</li>
+      </ul>
+      <p style="margin-top:8px;color:var(--text3);font-style:italic">Alles gebeurt lokaal in je browser — er wordt niets naar een server verstuurd.</p>
+    </div>
+  </details>
+
+  <div class="card">
+    <div class="card-title">📋 Klinimetrie-exports</div>
+    <div class="card-sub">Sleep de exportbestanden hierheen, of klik om te kiezen (meerdere bestanden mogelijk)</div>
+    <div class="dropzone" id="dz-klin" onclick="document.getElementById('inp-klin').click()">
+      <div class="dropzone-icon">📄</div>
+      <div class="dropzone-text"><strong>Klik om te uploaden</strong> of sleep bestanden hierheen (.xlsx)</div>
+      <input type="file" id="inp-klin" accept=".xlsx" multiple>
+    </div>
+    <div class="filelist" id="list-klin"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">🧾 Declaratie-exports</div>
+    <div class="card-sub">Sleep de exportbestanden hierheen, of klik om te kiezen (meerdere bestanden mogelijk)</div>
+    <div class="dropzone" id="dz-decl" onclick="document.getElementById('inp-decl').click()">
+      <div class="dropzone-icon">📄</div>
+      <div class="dropzone-text"><strong>Klik om te uploaden</strong> of sleep bestanden hierheen (.xlsx)</div>
+      <input type="file" id="inp-decl" accept=".xlsx" multiple>
+    </div>
+    <div class="filelist" id="list-decl"></div>
+  </div>
+
+  <div class="card">
+    <div class="btn-row">
+      <button class="btn btn-primary" id="btn-verwerk" onclick="verwerkBestanden()">Verwerken</button>
+      <button class="btn btn-secondary" onclick="resetAlles()">Alles wissen</button>
+    </div>
+    <div id="verwerk-msg"></div>
+  </div>
+
+  <div class="card" id="results-card" style="display:none">
+    <div class="card-title">✓ Resultaat</div>
+    <div class="card-sub" id="results-sub"></div>
+    <div class="log" id="results-log"></div>
+    <div id="results-table-wrap"></div>
+    <div class="btn-row">
+      <button class="btn btn-primary" id="btn-zip" onclick="downloadAllesAlsZip()" style="display:none">⬇ Download alles (zip)</button>
+    </div>
+  </div>
+
+  <div class="footer">ZorgTopic Splitter — Fyzio Totaal</div>
+</div>
+
+<script>
+// ── Config (identiek aan het Python-script) ────────────────────────────────
+const KLIN_PREFIX = "Klinimetrie";
+const DECL_PREFIX = "Declaratie";
+const ZORG_VOLGORDE = ["lage rug", "nekpijn", "schouderpijn"];
+const RED_ARGB = "FFD56062";
+const HEADER_FILL_ARGB = "FF4472C4";
+const BORDER_ARGB = "FFCCCCCC";
+
+let klinFiles = []; // {file, topic}
+let declFiles = [];
+let lastOutputFiles = []; // {name, buf}
+
+// ── Topic-detectie ──────────────────────────────────────────────────────────
+function detecteerTopic(bestandsnaam) {
+  const naam = bestandsnaam.toLowerCase();
+  if (naam.includes("lage_rug") || naam.includes("lage rug") || naam.includes("lagerug")) return "lage rug";
+  if (naam.includes("nek")) return "nekpijn";
+  if (naam.includes("schouder")) return "schouderpijn";
+  return bestandsnaam.replace(/\.[^/.]+$/, "").toLowerCase();
+}
+
+// ── Dropzone wiring ─────────────────────────────────────────────────────────
+function wireDropzone(dzId, inputId, list, onchange) {
+  const dz = document.getElementById(dzId);
+  const inp = document.getElementById(inputId);
+  inp.addEventListener('change', e => { addFiles(list, e.target.files, onchange); inp.value=''; });
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragover'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
+  dz.addEventListener('drop', e => {
+    e.preventDefault(); dz.classList.remove('dragover');
+    addFiles(list, e.dataTransfer.files, onchange);
+  });
+}
+function addFiles(list, fileListObj, onchange) {
+  for (const f of fileListObj) {
+    if (!f.name.toLowerCase().endsWith('.xlsx')) continue;
+    list.push({file:f, topic:detecteerTopic(f.name)});
+  }
+  onchange();
+}
+function renderFileList(containerId, list, onchange) {
+  const el = document.getElementById(containerId);
+  if (list.length===0){ el.innerHTML=''; return; }
+  el.innerHTML = list.map((item,i)=>`
+    <div class="fileitem">
+      <span class="fi-icon">📄</span>
+      <span class="fi-name" title="${item.file.name}">${item.file.name}</span>
+      <span class="fi-topic">${item.topic}</span>
+      <span class="fi-remove" onclick="removeFile('${containerId}',${i})">✕</span>
+    </div>`).join('');
+}
+function removeFile(containerId, idx) {
+  if (containerId==='list-klin') { klinFiles.splice(idx,1); renderFileList('list-klin', klinFiles); }
+  else { declFiles.splice(idx,1); renderFileList('list-decl', declFiles); }
+}
+wireDropzone('dz-klin','inp-klin', klinFiles, ()=>renderFileList('list-klin', klinFiles));
+wireDropzone('dz-decl','inp-decl', declFiles, ()=>renderFileList('list-decl', declFiles));
+
+function resetAlles(){
+  klinFiles = []; declFiles = []; lastOutputFiles = [];
+  renderFileList('list-klin', klinFiles);
+  renderFileList('list-decl', declFiles);
+  document.getElementById('verwerk-msg').innerHTML='';
+  document.getElementById('results-card').style.display='none';
+}
+
+// ── Inlezen ──────────────────────────────────────────────────────────────────
+async function readSheetRows(file) {
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, {type:'array', cellDates:true});
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  return XLSX.utils.sheet_to_json(ws, {header:1, raw:true, defval:null});
+}
+
+function verzamelTherapeuten(rows) {
+  const set = new Set();
+  for (let i=1;i<rows.length;i++){
+    const val = rows[i][0];
+    if (val!==null && val!==undefined) {
+      const s = String(val).trim();
+      if (s!=='' && s!=='-') set.add(s);
+    }
+  }
+  return set;
+}
+
+// ── ExcelJS opmaak-helpers ───────────────────────────────────────────────────
+function borderAll(){
+  const thin = {style:'thin', color:{argb:BORDER_ARGB}};
+  return {top:thin,left:thin,bottom:thin,right:thin};
+}
+function styleHeaderRow(row){
+  row.eachCell(cell => {
+    cell.font = {name:'Arial', size:10, bold:true, color:{argb:'FFFFFFFF'}};
+    cell.fill = {type:'pattern', pattern:'solid', fgColor:{argb:HEADER_FILL_ARGB}};
+    cell.alignment = {horizontal:'center', vertical:'middle', wrapText:true};
+    cell.border = borderAll();
+  });
+  row.height = 30;
+}
+function applyDateFormat(cell){
+  if (cell.value instanceof Date) cell.numFmt = 'dd-mm-yyyy hh:mm';
+}
+
+function addKlinSheet(wb, tabName, rows, therapeut) {
+  const header = rows[0];
+  const dataRows = rows.slice(1).filter(r => r[0]!=null && String(r[0]).trim()===therapeut);
+  if (dataRows.length===0) return false;
+  const sheet = wb.addWorksheet(tabName);
+  styleHeaderRow(sheet.addRow(header));
+  dataRows.forEach(r => {
+    const row = sheet.addRow(r);
+    row.eachCell((cell, colNumber) => {
+      cell.border = borderAll();
+      cell.font = {name:'Arial', size:10, color:{argb:'FF404040'}};
+      cell.alignment = {horizontal: colNumber<=2 ? 'left':'center', vertical:'middle'};
+      applyDateFormat(cell);
+      if (String(cell.value).trim()==='X') {
+        cell.fill = {type:'pattern', pattern:'solid', fgColor:{argb:RED_ARGB}};
+      }
+    });
+  });
+  sheet.getColumn(1).width = 22;
+  sheet.getColumn(2).width = 14;
+  for (let c=3;c<=header.length;c++) sheet.getColumn(c).width = 13;
+  sheet.views = [{state:'frozen', ySplit:1}];
+  return true;
+}
+
+function addDeclSheet(wb, tabName, rows, therapeut) {
+  const header = rows[0];
+  const dataRows = rows.slice(1).filter(r => r[0]!=null && String(r[0]).trim()===therapeut);
+  if (dataRows.length===0) return false;
+  const docIdx = header.findIndex(h => String(h||'').trim().toLowerCase()==='doc eerste behandeling');
+  const fcodeIdx = header.findIndex(h => String(h||'').trim().toLowerCase()==='f-code = sbst');
+  const sheet = wb.addWorksheet(tabName);
+  styleHeaderRow(sheet.addRow(header));
+  dataRows.forEach(r => {
+    const row = sheet.addRow(r);
+    row.eachCell((cell, colNumber) => {
+      cell.border = borderAll();
+      cell.font = {name:'Arial', size:10, color:{argb:'FF404040'}};
+      cell.alignment = {horizontal: colNumber<=3 ? 'left':'center', vertical:'middle'};
+      applyDateFormat(cell);
+    });
+    if (docIdx>=0 && fcodeIdx>=0) {
+      const docVal = r[docIdx], fcodeVal = r[fcodeIdx];
+      const heeftStartcode = docVal!=null && String(docVal).trim().toLowerCase()!=='geen startcode';
+      const isNee = fcodeVal!=null && String(fcodeVal).trim().toLowerCase()==='nee';
+      if (heeftStartcode && isNee) {
+        row.getCell(fcodeIdx+1).fill = {type:'pattern', pattern:'solid', fgColor:{argb:RED_ARGB}};
+      }
+    }
+  });
+  sheet.getColumn(1).width = 22;
+  for (let c=2;c<=header.length;c++) sheet.getColumn(c).width = 16;
+  sheet.views = [{state:'frozen', ySplit:1}];
+  return true;
+}
+
+// ── Hoofdverwerking ──────────────────────────────────────────────────────────
+async function verwerkBestanden() {
+  const msgEl = document.getElementById('verwerk-msg');
+  msgEl.innerHTML = '';
+  if (klinFiles.length===0 && declFiles.length===0) {
+    msgEl.innerHTML = `<div class="msg err">⚠ Upload eerst klinimetrie- en/of declaratie-bestanden.</div>`;
+    return;
+  }
+  const btn = document.getElementById('btn-verwerk');
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spinner"></span>Verwerken…`;
+
+  const log = [];
+  try {
+    const klinData = {}, declData = {};
+    for (const {file, topic} of klinFiles) {
+      klinData[topic] = await readSheetRows(file);
+      log.push({t:'ok', text:`Klinimetrie geladen: ${file.name} → ${topic}`});
+    }
+    for (const {file, topic} of declFiles) {
+      declData[topic] = await readSheetRows(file);
+      log.push({t:'ok', text:`Declaratie geladen: ${file.name} → ${topic}`});
+    }
+
+    const therapeutenSet = new Set();
+    Object.values(klinData).forEach(rows => verzamelTherapeuten(rows).forEach(t=>therapeutenSet.add(t)));
+    Object.values(declData).forEach(rows => verzamelTherapeuten(rows).forEach(t=>therapeutenSet.add(t)));
+    const therapeuten = [...therapeutenSet].sort();
+    log.push({t:'ok', text:`${therapeuten.length} therapeuten gevonden: ${therapeuten.join(', ')}`});
+
+    const aanwezigeTopics = [...new Set([...Object.keys(klinData), ...Object.keys(declData)])].sort();
+    const geordendeTopics = [
+      ...ZORG_VOLGORDE.filter(t=>aanwezigeTopics.includes(t)),
+      ...aanwezigeTopics.filter(t=>!ZORG_VOLGORDE.includes(t))
+    ];
+
+    const outputFiles = [];
+    for (const therapeut of therapeuten) {
+      const wb = new ExcelJS.Workbook();
+      let tabsAdded = 0;
+      const tabNames = [];
+      for (const topic of geordendeTopics) {
+        if (klinData[topic]) {
+          const tab = `${KLIN_PREFIX} ${topic}`;
+          if (addKlinSheet(wb, tab, klinData[topic], therapeut)) { tabsAdded++; tabNames.push(tab); }
+        }
+        if (declData[topic]) {
+          const tab = `${DECL_PREFIX} ${topic}`;
+          if (addDeclSheet(wb, tab, declData[topic], therapeut)) { tabsAdded++; tabNames.push(tab); }
+        }
+      }
+      if (tabsAdded===0) {
+        log.push({t:'warn', text:`⚠ Geen data voor ${therapeut} — bestand overgeslagen`});
+        continue;
+      }
+      const veiligeNaam = therapeut.replace(/\s+/g,'_');
+      const fname = `${veiligeNaam}_ZorgTopics_2026.xlsx`;
+      const arrayBuf = await wb.xlsx.writeBuffer();
+      outputFiles.push({name:fname, buf:arrayBuf, therapeut, tabs:tabNames});
+      log.push({t:'ok', text:`✓ ${therapeut} → ${fname} [${tabNames.join(', ')}]`});
+    }
+
+    lastOutputFiles = outputFiles;
+    renderResultaten(log, outputFiles);
+  } catch(e) {
+    msgEl.innerHTML = `<div class="msg err">⚠ Fout tijdens verwerken: ${e.message}</div>`;
+    console.error(e);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Verwerken';
+  }
+}
+
+function renderResultaten(log, outputFiles) {
+  const card = document.getElementById('results-card');
+  card.style.display = 'block';
+  document.getElementById('results-sub').textContent =
+    outputFiles.length>0 ? `${outputFiles.length} bestand(en) klaar om te downloaden.` : 'Geen bestanden gegenereerd.';
+  document.getElementById('results-log').innerHTML = log.map(l =>
+    `<div class="${l.t==='warn'?'warn-line':'ok-line'}">${l.text}</div>`).join('');
+
+  const wrap = document.getElementById('results-table-wrap');
+  if (outputFiles.length===0) { wrap.innerHTML=''; document.getElementById('btn-zip').style.display='none'; return; }
+  wrap.innerHTML = `<table class="results-table">
+    <thead><tr><th>Therapeut</th><th>Bestand</th><th>Tabbladen</th><th></th></tr></thead>
+    <tbody>${outputFiles.map((o,i)=>`
+      <tr>
+        <td>${o.therapeut}</td>
+        <td><span class="tabs-mini">${o.name}</span></td>
+        <td><span class="tabs-mini">${o.tabs.length}</span></td>
+        <td><a class="dl-link" href="#" onclick="downloadEen(${i});return false;">⬇ Download</a></td>
+      </tr>`).join('')}
+    </tbody></table>`;
+  document.getElementById('btn-zip').style.display = 'inline-block';
+}
+
+function downloadEen(i) {
+  const o = lastOutputFiles[i];
+  const blob = new Blob([o.buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = o.name;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function downloadAllesAlsZip() {
+  const btn = document.getElementById('btn-zip');
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spinner"></span>Zip maken…`;
+  try {
+    const zip = new JSZip();
+    lastOutputFiles.forEach(o => zip.file(o.name, o.buf));
+    const content = await zip.generateAsync({type:'blob'});
+    const url = URL.createObjectURL(content);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'ZorgTopics_per_therapeut_2026.zip';
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '⬇ Download alles (zip)';
+  }
+}
+</script>
+</body>
+</html>
