@@ -677,6 +677,28 @@ function renderMT(){
     </tr>`;
   }).join('');
 
+  // ── Thema 0: Trajecten analysis ──
+  function buildTrajAnalysis(){
+    function mag(d){return Math.abs(d)<2?'gelijk aan':d>0?Math.abs(d)<5?'iets hoger dan':Math.abs(d)<15?'hoger dan':'fors hoger dan':Math.abs(d)<5?'iets lager dan':Math.abs(d)<15?'lager dan':'fors lager dan';}
+    const lines=[];
+    rows.forEach(f=>{
+      const pr=hasPrev?prevRows.find(r=>r.topic===f.topic):null;
+      const pp2=prevPeriodRows?prevPeriodRows.find(r=>r.topic===f.topic):null;
+      const parts=[];
+      if(pr!=null){const d=f.totaal-pr.totaal;parts.push(`${mag(d)} ${prevYearLabel}`);}
+      if(pp2!=null){const d=f.totaal-pp2.totaal;parts.push(`${mag(d)} ${prevPeriodLabel}`);}
+      if(!parts.length)parts.push('geen vergelijkingsdata');
+      lines.push(`${cap(f.topic)}: ${parts.join(', ')}.`);
+    });
+    if(p!=null||tPrev!=null){
+      const parts=[];
+      if(p!=null){const d=t.totaal-p.totaal;parts.push(`${mag(d)} ${prevYearLabel}`);}
+      if(tPrev!=null){const d=t.totaal-tPrev.totaal;parts.push(`${mag(d)} ${prevPeriodLabel}`);}
+      lines.push(`Totaal: ${parts.join(', ')}.`);
+    }
+    return lines.join('<br>');
+  }
+
   // ── Theme 1: ZP analysis text ──
   function buildZPAnalysis(){
     function mag(d){return Math.abs(d)<2?'ongeveer gelijk':d>0?Math.abs(d)<5?'licht gestegen':Math.abs(d)<10?'gestegen':'fors gestegen':Math.abs(d)<5?'licht gedaald':Math.abs(d)<10?'gedaald':'fors gedaald';}
@@ -877,9 +899,49 @@ function renderMT(){
       </div>
     </div>
 
+    <!-- Thema 0: Aantal trajecten -->
+    <div class="theme-section">
+      <div class="theme-title"><span style="font-size:15px">📊</span>1. Aantal trajecten</div>
+      <div style="overflow-x:auto;margin-bottom:12px">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead><tr style="border-bottom:1.5px solid var(--border)">
+            <th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:500;color:var(--text3);text-transform:uppercase;letter-spacing:.05em">ZorgTopic</th>
+            <th style="padding:8px 10px;text-align:right;font-size:11px;font-weight:500;color:var(--text3);text-transform:uppercase;letter-spacing:.05em">Huidig</th>
+            ${hasPrev?`<th style="padding:8px 10px;text-align:right;font-size:11px;font-weight:500;color:var(--text3);text-transform:uppercase;letter-spacing:.05em">${prevYearLabel}</th><th style="padding:8px 10px;text-align:right;font-size:11px;font-weight:500;color:var(--text3)">Δ</th>`:''}
+            ${prevPeriodRows?`<th style="padding:8px 10px;text-align:right;font-size:11px;font-weight:500;color:var(--text3);text-transform:uppercase;letter-spacing:.05em">${prevPeriodLabel}</th><th style="padding:8px 10px;text-align:right;font-size:11px;font-weight:500;color:var(--text3)">Δ</th>`:''}
+          </tr></thead>
+          <tbody>
+            ${rows.map((f,i)=>{
+              const pr=hasPrev?prevRows.find(r=>r.topic===f.topic):null;
+              const pp2=prevPeriodRows?prevPeriodRows.find(r=>r.topic===f.topic):null;
+              const bg=i%2===0?'':'background:var(--surface2)';
+              function dCell(cur,prev){if(prev==null)return'';const d=cur-prev;const cls=d>0?'color:var(--up)':d<0?'color:var(--dn)':'color:var(--neu)';return`<td style="padding:8px 10px;text-align:right;font-family:'DM Mono',monospace;font-size:11px;${cls}">${d>0?'+':''}${d}</td>`;}
+              return`<tr style="${bg}">
+                <td style="padding:8px 10px;font-weight:500">${cap(f.topic)}</td>
+                <td style="padding:8px 10px;text-align:right;font-family:'DM Mono',monospace">${f.totaal}</td>
+                ${pr!=null?`<td style="padding:8px 10px;text-align:right;font-family:'DM Mono',monospace;color:var(--text3)">${pr.totaal}</td>${dCell(f.totaal,pr.totaal)}`:''}
+                ${pp2!=null?`<td style="padding:8px 10px;text-align:right;font-family:'DM Mono',monospace;color:var(--text3)">${pp2.totaal}</td>${dCell(f.totaal,pp2.totaal)}`:''}
+              </tr>`;
+            }).join('')}
+            <tr style="border-top:1.5px solid var(--border);font-weight:500">
+              <td style="padding:8px 10px">Totaal</td>
+              <td style="padding:8px 10px;text-align:right;font-family:'DM Mono',monospace">${t.totaal}</td>
+              ${p!=null?(()=>{const d=t.totaal-p.totaal;const cls=d>0?'color:var(--up)':d<0?'color:var(--dn)':'color:var(--neu)';return`<td style="padding:8px 10px;text-align:right;font-family:'DM Mono',monospace;color:var(--text3)">${p.totaal}</td><td style="padding:8px 10px;text-align:right;font-family:'DM Mono',monospace;${cls}">${d>0?'+':''}${d}</td>`;})():''}
+              ${tPrev!=null?(()=>{const d=t.totaal-tPrev.totaal;const cls=d>0?'color:var(--up)':d<0?'color:var(--dn)':'color:var(--neu)';return`<td style="padding:8px 10px;text-align:right;font-family:'DM Mono',monospace;color:var(--text3)">${tPrev.totaal}</td><td style="padding:8px 10px;text-align:right;font-family:'DM Mono',monospace;${cls}">${d>0?'+':''}${d}</td>`;})():''}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="theme-analysis">
+        <div class="theme-analysis-title">Analyse</div>
+        <div class="theme-analysis-text">${buildTrajAnalysis()}</div>
+        ${explanationBox(key,'traj','Vul hier een mogelijke verklaring in voor het MT…')}
+      </div>
+    </div>
+
     <!-- Thema 1: Zorgplan -->
     <div class="theme-section">
-      <div class="theme-title"><span style="font-size:15px">📋</span>1. Inclusiepercentages zorgplan</div>
+      <div class="theme-title"><span style="font-size:15px">📋</span>2. Inclusiepercentages zorgplan</div>
       <div class="analysis-grid">
         ${rows.map(f=>zpCard(f,hasPrev?prevRows.find(r=>r.topic===f.topic):null,prevPeriodRows?prevPeriodRows.find(r=>r.topic===f.topic):null)).join('')}
         ${totaalZPCard()}
@@ -893,7 +955,7 @@ function renderMT(){
 
     <!-- Thema 2: PF -->
     <div class="theme-section">
-      <div class="theme-title"><span style="font-size:15px">💊</span>2. Inclusiepercentages productfinanciering</div>
+      <div class="theme-title"><span style="font-size:15px">💊</span>3. Inclusiepercentages productfinanciering</div>
       <div class="analysis-grid">
         ${rows.map(f=>pfCard(f,hasPrev?prevRows.find(r=>r.topic===f.topic):null,prevPeriodRows?prevPeriodRows.find(r=>r.topic===f.topic):null)).join('')}
         ${totaalPFCard()}
@@ -907,7 +969,7 @@ function renderMT(){
 
     <!-- Thema 3: Risico -->
     <div class="theme-section">
-      <div class="theme-title"><span style="font-size:15px">📊</span>3. Risicoverdeling</div>
+      <div class="theme-title"><span style="font-size:15px">📊</span>4. Risicoverdeling</div>
       <div class="analysis-grid">
         ${rows.map(f=>riskCard(f,hasPrev?prevRows.find(r=>r.topic===f.topic):null,prevPeriodRows?prevPeriodRows.find(r=>r.topic===f.topic):null)).join('')}
         ${totaalRiskCard()}
