@@ -936,8 +936,8 @@ async function loadDataFromSupabase(){
       target[mk].push({topic:row.topic,totaal:row.totaal,csi:row.csi,zorgplan:row.zorgplan,pf:row.pf,low:row.low,med:row.med,high:row.high});
     });
     const numKeys=Object.keys(DATA).map(Number).filter(k=>!isNaN(k)).sort((a,b)=>b-a);
-    if(numKeys.length)curKey=numKeys[0];
-    render();renderCharts();if(mainTab==='mt')renderMT();
+    if(numKeys.length){curKey=numKeys[0];curMTKey=numKeys[0];}
+    render();renderCharts();renderMTNav();if(mainTab==='mt')renderMT();
   }catch(e){console.warn('Data laden mislukt:',e);}
 }
 
