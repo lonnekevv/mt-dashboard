@@ -574,8 +574,8 @@ Chart.register(targetPlugin());
 // PATCH 3: y-axis max 102 so top dots aren't clipped
 function chartOpts(){
   return{responsive:true,maintainAspectRatio:false,
-    plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.dataset.label+': '+c.parsed.y+'%'}},tl:{}},
-    scales:{y:{min:0,max:102,ticks:{callback:v=>v<=100?v+'%':'',font:{size:10},color:'#9E9B94'},grid:{color:'rgba(0,0,0,.05)'},border:{display:false}},
+    layout:{padding:{top:12}},plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.dataset.label+': '+c.parsed.y+'%'}},tl:{}},
+    scales:{y:{min:0,max:108,ticks:{callback:v=>v<=100?v+'%':'',font:{size:10},color:'#9E9B94'},grid:{color:'rgba(0,0,0,.05)'},border:{display:false}},
       x:{ticks:{font:{size:10},color:'#9E9B94',autoSkip:false},grid:{display:false},border:{display:false}}}};
 }
 function legH(){
@@ -610,7 +610,7 @@ function renderMultiYearChart(){
   const pfDS=mkDS(r=>[r.pf,r.csi]);
   const pfcDS=mkDS((r,yr,m)=>{const mv=getMV(yr,m,r.topic);return mv&&mv>0?[r.pf,mv]:[0,0];});
   const hasPFCorr=pfcDS.some(d=>d.data.some(v=>v!=null));
-  const co={responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.dataset.label+': '+c.parsed.y+'%'}},tl:{}},scales:{y:{min:0,max:102,ticks:{callback:v=>v<=100?v+'%':'',font:{size:10},color:'#9E9B94'},grid:{color:'rgba(0,0,0,.05)'},border:{display:false}},x:{ticks:{font:{size:11,weight:'600'},color:'#9E9B94'},grid:{display:false},border:{display:false}}}};
+  const co={responsive:true,maintainAspectRatio:false,layout:{padding:{top:12}},plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.dataset.label+': '+c.parsed.y+'%'}},tl:{}},scales:{y:{min:0,max:108,ticks:{callback:v=>v<=100?v+'%':'',font:{size:10},color:'#9E9B94'},grid:{color:'rgba(0,0,0,.05)'},border:{display:false}},x:{ticks:{font:{size:11,weight:'600'},color:'#9E9B94'},grid:{display:false},border:{display:false}}}};
   const tl=legH();
   wrap.innerHTML=`
     <div class="chart-full" style="margin-bottom:14px"><div class="chart-card"><div class="chart-title">Zorgplan% per jaar</div><div class="chart-legend">${tl}</div><div class="chart-wrap-lg"><canvas id="cmulti-zp"></canvas></div></div></div>
@@ -679,27 +679,27 @@ function renderMT(){
 
   // ── Theme 1: ZP analysis text ──
   function buildZPAnalysis(){
-    const parts=[];
+    function mag(d){return Math.abs(d)<2?'ongeveer gelijk':d>0?Math.abs(d)<5?'licht gestegen':Math.abs(d)<10?'gestegen':'fors gestegen':Math.abs(d)<5?'licht gedaald':Math.abs(d)<10?'gedaald':'fors gedaald';}
+    const lines=[];
     rows.forEach(f=>{
       const pzp=f.totaal?f.zorgplan/f.totaal:0;
       const pr=hasPrev?prevRows.find(r=>r.topic===f.topic):null;
       const pPzp=pr&&pr.totaal?pr.zorgplan/pr.totaal:null;
       const pp2=prevPeriodRows?prevPeriodRows.find(r=>r.topic===f.topic):null;
       const pmPzp=pp2&&pp2.totaal?pp2.zorgplan/pp2.totaal:null;
-      let line=`${cap(f.topic)}: ${pp(pzp)}`;
-      if(pzp*100>=TARGET)line+=` (boven streefwaarde ${TARGET}%)`;
-      else line+=` (onder streefwaarde ${TARGET}%, verschil ${(TARGET-pzp*100).toFixed(1)} pp)`;
-      if(pPzp!=null){const d=(pzp-pPzp)*100;line+=`, ${Math.abs(d).toFixed(1)} pp ${d>=0?'hoger':'lager'} dan ${prevYearLabel}`;}
-      if(pmPzp!=null){const d=(pzp-pmPzp)*100;if(Math.abs(d)>=2)line+=`, ${Math.abs(d).toFixed(1)} pp ${d>=0?'hoger':'lager'} dan ${prevPeriodLabel}`;}
-      parts.push(line+'.');
+      const parts=[];
+      if(pPzp!=null){const d=(pzp-pPzp)*100;parts.push(`${mag(d)} t.o.v. ${prevYearLabel}`);}
+      if(pmPzp!=null){const d=(pzp-pmPzp)*100;parts.push(`${mag(d)} t.o.v. ${prevPeriodLabel}`);}
+      if(!parts.length)parts.push(pzp*100>=TARGET?'boven streefwaarde':'onder streefwaarde');
+      lines.push(`${cap(f.topic)}: ${parts.join(', ')}.`);
     });
-    if(hasPrev){const dT=(t.pzp-p.pzp)*100;parts.push(`Totaal: ${Math.abs(dT).toFixed(1)} pp ${dT>=0?'stijging':'daling'} t.o.v. ${prevYearLabel} (${pp(p.pzp)} → ${pp(t.pzp)}).`);}
-    return parts.join(' ');
+    return lines.join('<br>');
   }
 
   // ── Theme 2: PF analysis text ──
   function buildPFAnalysis(){
-    const parts=[];
+    function mag(d){return Math.abs(d)<2?'ongeveer gelijk':d>0?Math.abs(d)<5?'licht gestegen':Math.abs(d)<10?'gestegen':'fors gestegen':Math.abs(d)<5?'licht gedaald':Math.abs(d)<10?'gedaald':'fors gedaald';}
+    const lines=[];
     rows.forEach(f=>{
       const ppf=f.csi?f.pf/f.csi:0;
       const pr=hasPrev?prevRows.find(r=>r.topic===f.topic):null;
@@ -707,39 +707,41 @@ function renderMT(){
       const pp2=prevPeriodRows?prevPeriodRows.find(r=>r.topic===f.topic):null;
       const pmPpf=pp2&&pp2.csi?pp2.pf/pp2.csi:null;
       const mv=getMV('cur',key,f.topic),ppfMV=mv!=null&&mv>0?f.pf/mv:null;
-      const pMV=getMV('prev',key,f.topic);const pr2=hasPrev?prevRows.find(r=>r.topic===f.topic):null;
+      const pMV=getMV('prev',key,f.topic),pr2=hasPrev?prevRows.find(r=>r.topic===f.topic):null;
       const pPpfMV=pMV!=null&&pMV>0&&pr2?pr2.pf/pMV:null;
-      let line=`${cap(f.topic)}: PF totaal ${pp(ppf)}`;
-      if(pPpf!=null){const d=(ppf-pPpf)*100;line+=` (${Math.abs(d).toFixed(1)} pp ${d>=0?'hoger':'lager'} dan ${prevYearLabel})`;}
-      if(pmPpf!=null){const d=(ppf-pmPpf)*100;if(Math.abs(d)>=2)line+=`, ${Math.abs(d).toFixed(1)} pp ${d>=0?'hoger':'lager'} dan ${prevPeriodLabel}`;}
-      if(ppfMV!=null){line+=`. PF gecorrigeerd: ${pp(ppfMV)}`;if(ppfMV*100>=TARGET)line+=` (boven streef ${TARGET}%)`;else line+=` (onder streef ${TARGET}%, verschil ${(TARGET-ppfMV*100).toFixed(1)} pp)`;if(pPpfMV!=null){const d=(ppfMV-pPpfMV)*100;line+=`, ${Math.abs(d).toFixed(1)} pp ${d>=0?'hoger':'lager'} dan ${prevYearLabel}`;}}
-      parts.push(line+'.');
+      const parts=[];
+      if(pPpf!=null){const d=(ppf-pPpf)*100;parts.push(`PF totaal ${mag(d)} t.o.v. ${prevYearLabel}`);}
+      if(pmPpf!=null){const d=(ppf-pmPpf)*100;if(Math.abs(d)>=2)parts.push(`${mag(d)} t.o.v. ${prevPeriodLabel}`);}
+      if(ppfMV!=null){
+        const corrParts=[];
+        if(pPpfMV!=null){const d=(ppfMV-pPpfMV)*100;corrParts.push(`${mag(d)} t.o.v. ${prevYearLabel}`);}
+        parts.push(`PF gecorrigeerd ${corrParts.length?corrParts.join(', '):(ppfMV*100>=TARGET?'boven streefwaarde':'onder streefwaarde')}`);
+      }
+      if(!parts.length)parts.push('geen vergelijkingsdata beschikbaar');
+      lines.push(`${cap(f.topic)}: ${parts.join('; ')}.`);
     });
-    return parts.join(' ');
+    return lines.join('<br>');
   }
 
   // ── Theme 3: Risk analysis text ──
   function buildRiskAnalysis(){
-    const parts=[];
+    function mag(d){return Math.abs(d)<3?'stabiel':d>0?Math.abs(d)<8?'licht toegenomen':'fors toegenomen':Math.abs(d)<8?'licht afgenomen':'fors afgenomen';}
+    const lines=[];
     rows.forEach(f=>{
       const pr=hasPrev?prevRows.find(r=>r.topic===f.topic):null;
       const pp2=prevPeriodRows?prevPeriodRows.find(r=>r.topic===f.topic):null;
-      let line=`${cap(f.topic)}: low ${pp(f.low)}, medium ${pp(f.med)}, high ${pp(f.high)}`;
-      if(pr){
-        const dL=(f.low-pr.low)*100,dM=(f.med-pr.med)*100,dH=(f.high-pr.high)*100;
-        if(Math.abs(dL)>=3||Math.abs(dM)>=3||Math.abs(dH)>=3){
-          line+=` (t.o.v. ${prevYearLabel}: low ${dL>=0?'+':''}${dL.toFixed(0)}pp, med ${dM>=0?'+':''}${dM.toFixed(0)}pp, high ${dH>=0?'+':''}${dH.toFixed(0)}pp)`;
-        }
-      }
-      if(pp2){
-        const dL=(f.low-pp2.low)*100,dM=(f.med-pp2.med)*100,dH=(f.high-pp2.high)*100;
-        if(Math.abs(dL)>=5||Math.abs(dM)>=5||Math.abs(dH)>=5){
-          line+=` (t.o.v. ${prevPeriodLabel}: low ${dL>=0?'+':''}${dL.toFixed(0)}pp, med ${dM>=0?'+':''}${dM.toFixed(0)}pp, high ${dH>=0?'+':''}${dH.toFixed(0)}pp)`;
-        }
-      }
-      parts.push(line+'.');
+      const cmpRow=pr||pp2;
+      const cmpLabel=pr?prevYearLabel:(pp2?prevPeriodLabel:'');
+      if(!cmpRow){lines.push(`${cap(f.topic)}: geen vergelijkingsdata.`);return;}
+      const dL=(f.low-cmpRow.low)*100,dM=(f.med-cmpRow.med)*100,dH=(f.high-cmpRow.high)*100;
+      const changed=[];
+      if(Math.abs(dL)>=3)changed.push(`low ${mag(dL)}`);
+      if(Math.abs(dM)>=3)changed.push(`medium ${mag(dM)}`);
+      if(Math.abs(dH)>=3)changed.push(`high ${mag(dH)}`);
+      const txt=changed.length?changed.join(', ')+` t.o.v. ${cmpLabel}`:'geen significante verschuiving';
+      lines.push(`${cap(f.topic)}: ${txt}.`);
     });
-    return parts.join(' ');
+    return lines.join('<br>');
   }
 
   // ── ZP cards ──
@@ -1190,6 +1192,11 @@ function render(){
   renderRisk(rows,prevRows);
 }
 
+// Set curKey and curMTKey to most recent available month
+(function(){
+  const numKeys=Object.keys(DATA).map(Number).filter(n=>!isNaN(n)).sort((a,b)=>b-a);
+  if(numKeys.length){curKey=numKeys[0];curMTKey=numKeys[0];}
+})();
 render();renderCharts();renderMTNav();
 loadMVFromSupabase();
 loadDataFromSupabase();
