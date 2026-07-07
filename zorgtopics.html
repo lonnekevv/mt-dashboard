@@ -397,7 +397,10 @@ let curKey=4,curMTKey=4,mainTab='data',riskTab='2026';
 let czp=null,cpf=null,cmv=null,cmulti=null;
 const cardView={};
 // Store user-entered explanations per period+theme
-const explanations={};
+// Explanations persisted in localStorage
+const EXP_LS_KEY='zt_explanations';
+function _loadExp(){try{const s=localStorage.getItem(EXP_LS_KEY);return s?JSON.parse(s):{}}catch{return {};}}
+function _saveExp(exp){try{localStorage.setItem(EXP_LS_KEY,JSON.stringify(exp));}catch{}}
 
 function switchMainTab(tab){
   mainTab=tab;
@@ -626,10 +629,12 @@ function renderMultiYearChart(){
 
 // ── EXPLANATION STORAGE ──────────────────────────────────────────────────
 function saveExplanation(key,theme,val){
-  if(!explanations[String(key)])explanations[String(key)]={};
-  explanations[String(key)][theme]=val;
+  const exp=_loadExp();
+  if(!exp[String(key)])exp[String(key)]={};
+  exp[String(key)][theme]=val;
+  _saveExp(exp);
 }
-function getExplanation(key,theme){return explanations[String(key)]?.[theme]||'';}
+function getExplanation(key,theme){return _loadExp()[String(key)]?.[theme]||'';}
 
 function explanationBox(key,theme,placeholder){
   const val=getExplanation(key,theme);
