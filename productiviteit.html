@@ -330,6 +330,16 @@ function InvoerTab({formData,setFormData}) {
     await persist(updated);
   }
 
+  async function removeUpload(c) {
+    const updated = {...formData, [c]: emptyRow()};
+    setFormData(updated);
+    setAiFilled(p=>({...p,[c]:false}));
+    setAiState(p=>({...p,[c]:{status:"idle",msg:"",npDetected:0,breakdown:null}}));
+    setShowBreakdown(p=>({...p,[c]:false}));
+    setNpInput(p=>({...p,[c]:""}));
+    await persist(updated);
+  }
+
   function handleAddCollega() {
     const naam = newCollega.trim();
     if (!naam || collegas.includes(naam)) return;
@@ -375,7 +385,15 @@ function InvoerTab({formData,setFormData}) {
                       style={{background:"transparent",border:"1px solid "+BRAND.blueBorder,borderRadius:6,padding:"5px 10px",fontSize:13,cursor:st.status==="loading"?"not-allowed":"pointer",color:BRAND.blueDark,fontFamily:"'Poppins',sans-serif"}}>
                       {st.status==="loading"?"⏳":"📷"}
                     </button>
-                    {aiFilled[c] && st.status!=="loading" && <div style={{fontSize:10,color:BRAND.blueDark,marginTop:3}}>🤖 AI-ingevuld</div>}
+                    {aiFilled[c] && st.status!=="loading" && (
+                      <div style={{display:"flex",alignItems:"center",gap:5,marginTop:3}}>
+                        <span style={{fontSize:10,color:BRAND.blueDark}}>🤖 AI-ingevuld</span>
+                        <button onClick={()=>removeUpload(c)} title="Verwijder deze upload"
+                          style={{background:"none",border:"none",color:BRAND.danger,fontSize:10,textDecoration:"underline",cursor:"pointer",padding:0,fontFamily:"'Poppins',sans-serif"}}>
+                          ✕ verwijder
+                        </button>
+                      </div>
+                    )}
                     {st.status==="error" && <div style={{fontSize:10,color:BRAND.danger,marginTop:3,maxWidth:120}}>⚠ {st.msg}</div>}
                     {st.status==="ok" && st.msg && <div style={{fontSize:10,color:BRAND.textMuted,marginTop:3,maxWidth:120}}>ℹ {st.msg}</div>}
                     {st.status==="ok" && st.breakdown && (
