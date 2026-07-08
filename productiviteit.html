@@ -122,6 +122,41 @@ function fileToBase64(file) {
   });
 }
 
+// De AGENDA_PROMPT en de aanroep naar de Anthropic API leven weer client-side,
+// net als bij de andere Fyzio Totaal-tools (KLACHT-assistent, Peesklachten-tool):
+// eenmalige API-key invoer, opgeslagen in localStorage onder 'ft_apikey'.
+
+function getApiKey() {
+  return localStorage.getItem("ft_apikey") || "";
+}
+
+function vraagApiKey() {
+  return new Promise(function(resolve) {
+    var overlay = document.createElement("div");
+    overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px";
+    overlay.innerHTML = '<div style="background:#fff;border-radius:12px;padding:24px;max-width:380px;width:100%;font-family:\'Poppins\',sans-serif"><p style="font-size:15px;font-weight:700;color:#82176D;margin-bottom:8px">API key invoeren</p><p style="font-size:13px;color:#555;line-height:1.6;margin-bottom:16px">Voer eenmalig de API key in. Deze wordt opgeslagen in je browser en hoef je daarna niet opnieuw in te voeren.</p><input id="prod-apikey-input" type="password" placeholder="sk-ant-api03-..." style="width:100%;padding:10px 12px;border-radius:8px;border:1.5px solid #e6cde0;font-size:14px;box-sizing:border-box;margin-bottom:8px;font-family:monospace"><p id="prod-apikey-fout" style="font-size:12px;color:#f87171;display:none;margin-bottom:8px">Voer een geldige key in (begint met sk-ant-).</p><button id="prod-apikey-opslaan" style="width:100%;padding:11px;border-radius:8px;border:none;background:#82176D;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:\'Poppins\',sans-serif">Opslaan en doorgaan</button></div>';
+    document.body.appendChild(overlay);
+    var input = overlay.querySelector("#prod-apikey-input");
+    var btn = overlay.querySelector("#prod-apikey-opslaan");
+    var fout = overlay.querySelector("#prod-apikey-fout");
+    var opslaan = function() {
+      var val = input.value.trim();
+      if (!val.startsWith("sk-ant-")) { fout.style.display = "block"; return; }
+      localStorage.setItem("ft_apikey", val);
+      document.body.removeChild(overlay);
+      resolve(val);
+    };
+    btn.onclick = opslaan;
+    input.onkeydown = function(e) { if (e.key === "Enter") opslaan(); };
+  });
+}
+
+async function zorgVoorApiKey() {
+  var key = getApiKey();
+  if (!key) key = await vraagApiKey();
+  return key;
+}
+
 const AGENDA_PROMPT = "Je krijgt een screenshot van de weekagenda van één fysio-collega bij Fyzio Totaal. De agenda heeft vijf kolommen (maandag t/m vrijdag); de datum staat bovenaan de kolom, de dagnaam staat er direct onder.\n\n"
   + "BELANGRIJK — TIJD AFLEZEN: de tijd die links naast een blok staat is de STARTTIJD van dat blok. De tijd die links naast het volgende blok ERONDER staat is de EINDTIJD van het blok erboven (en dus tegelijk de starttijd van de afspraak die daarna begint). Lees dus per blok altijd de tijd ernaast én de tijd van het eerstvolgende blok eronder om de duur te bepalen — neem niet zomaar aan dat een blok een vaste standaardduur heeft.\n\n"
   + "Analyseer vervolgens alle geblokkeerde tijdvakken per dag volgens deze regels, die specifiek zijn voor deze praktijk:\n\n"
@@ -136,8 +171,6 @@ const AGENDA_PROMPT = "Je krijgt een screenshot van de weekagenda van één fysi
   + "VERGADERING (telt mee in \"vergadering_uren\"):\n"
   + "- Donkerblauwe blokken en/of blokken met een label als \"Teamoverleg\", \"MT\" of vergelijkbaar.\n"
   + "- Roze (of vergelijkbaar gekleurde) blokken die ALLEEN een persoonsnaam bevatten, zonder het woord \"Patientafspraak\" erbij (bijv. \"Lonneke Mayke\") — dit is een vergadermoment met die persoon, geen patiëntcontact.\n\n"
-  + "VERGADERING (telt mee in \"vergadering_uren\"):\n"
-  + "- Donkerblauwe blokken en/of blokken met een label als \"Teamoverleg\", \"MT\", \"overleg\" of vergelijkbaar.\n\n"
   + "NIET MEETELLEN (negeer volledig, in geen enkele categorie):\n"
   + "- Lege/grijze vakken en \"Pauze\".\n"
   + "- Tekstregels die beginnen met een liggend streepje \"-\" en die ONDER een ander blok staan (bijv. \"- exporttabellen\", \"- schema Richard\") — dit zijn persoonlijke notities, geen tijdvakken.\n"
@@ -154,11 +187,17 @@ const AGENDA_PROMPT = "Je krijgt een screenshot van de weekagenda van één fysi
   + "Het veld \"opmerking\" mag een korte (max 20 woorden) toelichting bevatten over onzekere interpretaties, anders een lege string.";
 
 async function analyzeAgendaScreenshot(base64, mediaType) {
+  const apiKey = await zorgVoorApiKey();
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
     body: JSON.stringify({
-      model: "claude-sonnet-4-6",
+      model: "claude-sonnet-4-5",
       max_tokens: 1000,
       messages: [{
         role: "user",
@@ -169,11 +208,13 @@ async function analyzeAgendaScreenshot(base64, mediaType) {
       }]
     })
   });
-  if (!response.ok) throw new Error("API-fout: HTTP "+response.status);
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error("HTTP "+response.status+": "+errText);
+  }
   const data = await response.json();
-  const textBlock = (data.content||[]).find(b=>b.type==="text");
-  if (!textBlock) throw new Error("Geen antwoord ontvangen");
-  const clean = textBlock.text.replace(/```json|```/g,"").trim();
+  const textOut = data.content.map(function(b){ return b.text || ""; }).join("");
+  const clean = textOut.replace(/```json|```/g,"").trim();
   let parsed;
   try { parsed = JSON.parse(clean); }
   catch(e) { throw new Error("Kon de agenda niet automatisch interpreteren — vul handmatig in"); }
