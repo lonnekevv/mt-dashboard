@@ -159,12 +159,16 @@ async function zorgVoorApiKey() {
 
 const AGENDA_PROMPT = "Je krijgt een screenshot van de weekagenda van één fysio-collega bij Fyzio Totaal. De agenda heeft vijf kolommen (maandag t/m vrijdag); de datum staat bovenaan de kolom, de dagnaam staat er direct onder.\n\n"
   + "BELANGRIJK — TIJD AFLEZEN: de tijd die links naast een blok staat is de STARTTIJD van dat blok. De tijd die links naast het volgende blok ERONDER staat is de EINDTIJD van het blok erboven (en dus tegelijk de starttijd van de afspraak die daarna begint). Lees dus per blok altijd de tijd ernaast én de tijd van het eerstvolgende blok eronder om de duur te bepalen — neem niet zomaar aan dat een blok een vaste standaardduur heeft.\n\n"
-  + "STAP 1 — WERKVENSTER PER DAG BEPALEN (dit bepaalt de gewerkte uren):\n"
-  + "Grijze/lege vakken betekenen dat de collega afwezig is (niet werkt). Bepaal per dag:\n"
-  + "- STARTTIJD = de tijd die links staat naast het EERSTE niet-grijze blok van die dag.\n"
-  + "- EINDTIJD = de tijd die links staat naast het eerstvolgende grijze/lege blok NADAT de collega is begonnen (dus het moment waarop de aaneengesloten reeks werkblokken stopt en er weer een grijs vak begint).\n"
-  + "- Is een hele dag grijs/leeg? Dan werkt de collega die dag niet: start en eind zijn dan null, uren is 0.\n"
-  + "- De gewerkte tijd van die dag is EINDTIJD minus STARTTIJD (dit is dus de hele aanwezigheidstijd, inclusief eventuele korte tussenpozen zoals kort wachten tussen twee afspraken — niet alleen de losse geboekte blokken).\n"
+  + "STAP 1 — WERKVENSTER PER DAG BEPALEN (dit bepaalt de gewerkte uren) — LEES DIT ZEER NAUWKEURIG:\n"
+  + "Er zijn TWEE totaal verschillende soorten lege vakken in deze agenda, en ze worden vaak verward:\n"
+  + "  (a) GRIJS GEVULDE vakken (een duidelijk grijze/donkere achtergrondkleur, zonder tekst) = de collega is AFWEZIG: niet aanwezig, niet betaald, niet gewerkt.\n"
+  + "  (b) WITTE/BLANCO vakken (geen achtergrondkleur, alleen een dun randlijntje, geen tekst) = de collega IS AANWEZIG maar heeft op dat moment geen patiënt: dit telt gewoon mee als gewerkte tijd (net als een blok mét een afspraak).\n"
+  + "Verwar deze twee NOOIT met elkaar. Vergelijk een twijfelachtig vak met de vakken rondom het begin en einde van de dag: grijze afwezigheidsvakken zitten vrijwel altijd alleen helemaal aan het BEGIN van de dag (vroege ochtend, vóórdat iemand is begonnen) en/of helemaal aan het EIND van de dag (late avond, nadat iemand weg is) — in het midden van de werkdag zijn lege vakken zo goed als altijd wit/blanco (aanwezig, geen patiënt), NIET grijs.\n"
+  + "Bepaal per dag PRECIES ÉÉN overgang van grijs naar niet-grijs, en PRECIES ÉÉN overgang terug van niet-grijs naar grijs (verderop diezelfde dag):\n"
+  + "- STARTTIJD = de tijd die links staat naast het EERSTE vak van de dag dat niet grijs-gevuld is (dit kan een wit/blanco vak zijn óf een gekleurd/tekst-vak — als het niet die grijze afwezigheidskleur heeft, telt het als begin van de werkdag).\n"
+  + "- EINDTIJD = de tijd die links staat naast het eerstvolgende GRIJS-GEVULDE vak dat je tegenkomt nadat de collega is begonnen. Zoek dit vak pas op nadat je zeker weet dat het echt grijs-gevuld is (en niet wit/blanco) — twijfel je, kijk dan of de vakken ERNA ook allemaal grijs blijven tot het einde van de agenda; zo ja, dan heb je het juiste eindpunt te pakken.\n"
+  + "- Alles tussen STARTTIJD en EINDTIJD telt mee als gewerkte tijd, inclusief eventuele witte/blanco tussenvakken zonder patiënt — dit is één aaneengesloten aanwezigheidsblok, ook al zit er geen patiëntafspraak in elk vakje.\n"
+  + "- Is een hele dag grijs-gevuld (geen enkel wit of gekleurd vak)? Dan werkt de collega die dag niet: start en eind zijn dan null, uren is 0.\n"
   + "Zet dit resultaat in het veld \"dagen\": een array met exact 5 objecten (maandag t/m vrijdag), elk met \"dag\", \"start\" (of null), \"eind\" (of null) en \"uren\" (afgerond op kwartieren).\n\n"
   + "STAP 2 — CATEGORISEER de blokken BINNEN het werkvenster van elke dag (dit is alleen voor de uitsplitsing, telt niet nogmaals op bij de gewerkte uren):\n\n"
   + "PATIËNTCONTACT (telt mee in \"patient_uren\"):\n"
@@ -179,7 +183,7 @@ const AGENDA_PROMPT = "Je krijgt een screenshot van de weekagenda van één fysi
   + "- Donkerblauwe blokken en/of blokken met een label als \"Teamoverleg\", \"MT\" of vergelijkbaar.\n"
   + "- Roze (of vergelijkbaar gekleurde) blokken die ALLEEN een persoonsnaam bevatten, zonder het woord \"Patientafspraak\" erbij (bijv. \"Lonneke Mayke\") — dit is een vergadermoment met die persoon, geen patiëntcontact.\n\n"
   + "NIET MEETELLEN (negeer volledig, in geen enkele categorie):\n"
-  + "- Grijze/lege vakken en \"Pauze\" (deze bepalen wel het werkvenster uit stap 1, maar tellen zelf niet als categorie).\n"
+  + "- Grijs-gevulde afwezigheidsvakken en \"Pauze\" (deze bepalen wel het werkvenster uit stap 1, maar tellen zelf niet als categorie). Witte/blanco vakken zonder patiënt tellen ook in GEEN van de categorieën hieronder mee (ze vallen simpelweg binnen het werkvenster uit stap 1 als 'aanwezig, geen patiënt').\n"
   + "- Tekstregels die beginnen met een liggend streepje \"-\" en die ONDER een ander blok staan (bijv. \"- exporttabellen\", \"- schema Richard\") — dit zijn persoonlijke notities, geen tijdvakken.\n"
   + "- \"Zaal patient\" zónder aparte \"Patientafspraak\" erbij — dat betekent alleen dat er geen kamer vrij was, niet dat er al een patiënt gepland is.\n"
   + "- Het blok \"FysioFit uur\" zelf — dit is puur een label voor het tijdslot; tel alleen de losse bruine \"Patientafspraak\"-blokken daarbinnen.\n"
@@ -276,7 +280,6 @@ function InvoerTab({formData,setFormData}) {
   const [newCollega,setNewCollega] = useState("");
   const [aiState,setAiState] = useState({}); // {[collega]: {status:'idle'|'loading'|'error', msg}} — puur voor de actie zelf, niet persistent
   const [npInput,setNpInput] = useState({}); // {[collega]: "1.5"} handmatige correctie voor 'np'-blokken
-  const [showBreakdown,setShowBreakdown] = useState({}); // {[collega]: true} — puur UI-voorkeur, hoeft niet persistent
 
   useEffect(()=>{
     const wk = weeks[currentMonday];
@@ -286,7 +289,6 @@ function InvoerTab({formData,setFormData}) {
     setSaved(false);
     setAiState({});
     setNpInput({});
-    setShowBreakdown({});
   },[currentMonday,weeks,collegas]);
 
   const onVal=useCallback((c,field,v)=>{
@@ -337,7 +339,6 @@ function InvoerTab({formData,setFormData}) {
     const updated = {...formData, [c]: emptyRow()};
     setFormData(updated);
     setAiState(p=>({...p,[c]:{status:"idle",msg:""}}));
-    setShowBreakdown(p=>({...p,[c]:false}));
     setNpInput(p=>({...p,[c]:""}));
     await persist(updated);
   }
@@ -388,52 +389,17 @@ function InvoerTab({formData,setFormData}) {
                       style={{background:"transparent",border:"1px solid "+BRAND.blueBorder,borderRadius:6,padding:"5px 10px",fontSize:13,cursor:st.status==="loading"?"not-allowed":"pointer",color:BRAND.blueDark,fontFamily:"'Poppins',sans-serif"}}>
                       {st.status==="loading"?"⏳":"📷"}
                     </button>
-                    {row._ai && st.status!=="loading" && (
-                      <div style={{display:"flex",alignItems:"center",gap:5,marginTop:3,flexWrap:"wrap"}}>
-                        <span style={{fontSize:10,color:BRAND.blueDark}}>🤖 AI-ingevuld</span>
-                        <button onClick={()=>removeUpload(c)} title="Verwijder deze upload"
-                          style={{background:"none",border:"none",color:BRAND.danger,fontSize:10,textDecoration:"underline",cursor:"pointer",padding:0,fontFamily:"'Poppins',sans-serif"}}>
-                          ✕ verwijder
-                        </button>
-                      </div>
-                    )}
+                    {row._ai && st.status!=="loading" && <div style={{fontSize:10,color:BRAND.blueDark,marginTop:3}}>🤖 AI-ingevuld</div>}
                     {st.status==="error" && <div style={{fontSize:10,color:BRAND.danger,marginTop:3,maxWidth:120}}>⚠ {st.msg}</div>}
                     {row._ai && row._ai.opmerking && <div style={{fontSize:10,color:BRAND.textMuted,marginTop:3,maxWidth:120}}>ℹ {row._ai.opmerking}</div>}
+                    {(row.gewerkt!=="" || row.patient!=="") && (
+                      <button onClick={()=>removeUpload(c)} title="Wis de uren van deze collega voor deze week"
+                        style={{background:"none",border:"none",color:BRAND.danger,fontSize:10,textDecoration:"underline",cursor:"pointer",padding:0,marginTop:3,fontFamily:"'Poppins',sans-serif"}}>
+                        ✕ wis deze week
+                      </button>
+                    )}
                     {row._ai && (
-                      <div style={{marginTop:4}}>
-                        <button onClick={()=>setShowBreakdown(p=>({...p,[c]:!p[c]}))}
-                          style={{background:"none",border:"none",color:BRAND.blueDark,fontSize:10,textDecoration:"underline",cursor:"pointer",padding:0,fontFamily:"'Poppins',sans-serif"}}>
-                          {showBreakdown[c] ? "Verberg uitsplitsing" : "Toon uitsplitsing"}
-                        </button>
-                        {showBreakdown[c] && (
-                          <div style={{marginTop:5,background:"#fff",border:"1px solid "+BRAND.border,borderRadius:6,padding:"6px 8px",maxWidth:190,textAlign:"left"}}>
-                            <table style={{fontSize:10,borderCollapse:"collapse",width:"100%",marginBottom:5}}>
-                              <thead><tr style={{color:BRAND.textMuted}}>
-                                <th style={{textAlign:"left",padding:"1px 3px"}}>Dag</th>
-                                <th style={{textAlign:"center",padding:"1px 3px"}}>Van</th>
-                                <th style={{textAlign:"center",padding:"1px 3px"}}>Tot</th>
-                                <th style={{textAlign:"right",padding:"1px 3px"}}>Uur</th>
-                              </tr></thead>
-                              <tbody>
-                                {(row._ai.dagen||[]).map((d,i)=>(
-                                  <tr key={i}>
-                                    <td style={{padding:"1px 3px",textTransform:"capitalize"}}>{d.dag}</td>
-                                    <td style={{textAlign:"center",padding:"1px 3px"}}>{d.start||"—"}</td>
-                                    <td style={{textAlign:"center",padding:"1px 3px"}}>{d.eind||"—"}</td>
-                                    <td style={{textAlign:"right",padding:"1px 3px"}}>{d.uren||0}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                            <div style={{fontSize:10,color:BRAND.text,lineHeight:1.6,borderTop:"1px solid "+BRAND.border,paddingTop:4}}>
-                              <div>Patiëntcontact: <b>{row._ai.patient}u</b></div>
-                              <div>Overig: <b>{row._ai.overig}u</b></div>
-                              <div>Vergadering: <b>{row._ai.vergadering}u</b></div>
-                              {row._ai.npPending>0 && <div>Oranje (❗) apart: <b>{row._ai.npPending}u</b></div>}
-                            </div>
-                          </div>
-                        )}
-                      </div>
+                      <div style={{fontSize:10,color:BRAND.textMuted,marginTop:3}}>Uitsplitsing: zie tab "Per collega"</div>
                     )}
                     {row._ai && row._ai.npPending>0 && (
                       <div style={{fontSize:10,color:BRAND.warn,marginTop:5,background:BRAND.warnBg,border:"1px solid "+BRAND.warn,borderRadius:6,padding:"5px 6px",maxWidth:140,textAlign:"left"}}>
@@ -496,9 +462,11 @@ function InvoerTab({formData,setFormData}) {
 
 // ── COLLEGA (DETAIL) TAB ─────────────────────────────────────────────
 function CollegaTab() {
-  const {weeks,collegas} = React.useContext(DataCtx);
+  const {weeks,collegas,reload} = React.useContext(DataCtx);
   const [sel,setSel] = useState(collegas[0]||"");
   useEffect(()=>{ if(!sel && collegas.length) setSel(collegas[0]); },[collegas]);
+  const [expanded,setExpanded] = useState({}); // {[wk]: true}
+  const [deleting,setDeleting] = useState({}); // {[wk]: true}
 
   const rows = useMemo(()=>{
     return Object.keys(weeks).sort().reverse()
@@ -506,7 +474,7 @@ function CollegaTab() {
       .map(wk => {
         const r = weeks[wk][sel];
         const g = num(r.gewerkt), pt = num(r.patient);
-        return { wk, g, pt, p: pct(g,pt) };
+        return { wk, g, pt, p: pct(g,pt), ai: r._ai || null };
       });
   },[weeks,sel]);
 
@@ -515,6 +483,17 @@ function CollegaTab() {
     if (!valid.length) return null;
     return Math.round((valid.reduce((s,r)=>s+r.p,0)/valid.length)*10)/10;
   },[rows]);
+
+  async function deleteWeekEntry(wk) {
+    setDeleting(p=>({...p,[wk]:true}));
+    try {
+      const updatedWeek = {...weeks[wk], [sel]: emptyRow()};
+      await saveRow(wk, updatedWeek);
+      await reload();
+    } finally {
+      setDeleting(p=>({...p,[wk]:false}));
+    }
+  }
 
   return (
     <div>
@@ -536,7 +515,55 @@ function CollegaTab() {
       {rows.length===0
         ? <div style={{fontSize:13,color:BRAND.textMuted,padding:"1rem"}}>Nog geen gegevens ingevoerd voor {sel}.</div>
         : rows.map(r=>(
-            <ProdBar key={r.wk} label={formatWeekLabel(r.wk)} p={r.p} sub={r.pt+"u patiëntcontact van "+r.g+"u gewerkt"} />
+            <div key={r.wk} style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderRadius:10,padding:"12px 14px",marginBottom:10}}>
+              <ProdBar label={formatWeekLabel(r.wk)} p={r.p} sub={r.pt+"u patiëntcontact van "+r.g+"u gewerkt"} />
+              <div style={{display:"flex",gap:14,marginTop:2}}>
+                {r.ai && (
+                  <button onClick={()=>setExpanded(p=>({...p,[r.wk]:!p[r.wk]}))}
+                    style={{background:"none",border:"none",color:BRAND.blueDark,fontSize:11,textDecoration:"underline",cursor:"pointer",padding:0,fontFamily:"'Poppins',sans-serif"}}>
+                    {expanded[r.wk] ? "Verberg uitsplitsing" : "Toon uitsplitsing"}
+                  </button>
+                )}
+                <button onClick={()=>deleteWeekEntry(r.wk)} disabled={deleting[r.wk]}
+                  style={{background:"none",border:"none",color:BRAND.danger,fontSize:11,textDecoration:"underline",cursor:deleting[r.wk]?"not-allowed":"pointer",padding:0,fontFamily:"'Poppins',sans-serif"}}>
+                  {deleting[r.wk] ? "Bezig met wissen…" : "✕ wis deze week"}
+                </button>
+              </div>
+              {r.ai && expanded[r.wk] && (
+                <div style={{marginTop:10,background:BRAND.purplePale,border:"1px solid "+BRAND.border,borderRadius:8,padding:"10px 12px"}}>
+                  {r.ai.opmerking && <div style={{fontSize:12,color:BRAND.textMuted,marginBottom:8}}>ℹ {r.ai.opmerking}</div>}
+                  <table style={{fontSize:12,borderCollapse:"collapse",width:"100%",marginBottom:8}}>
+                    <thead><tr style={{color:BRAND.textMuted,borderBottom:"1px solid "+BRAND.border}}>
+                      <th style={{textAlign:"left",padding:"3px 6px"}}>Dag</th>
+                      <th style={{textAlign:"center",padding:"3px 6px"}}>Van</th>
+                      <th style={{textAlign:"center",padding:"3px 6px"}}>Tot</th>
+                      <th style={{textAlign:"right",padding:"3px 6px"}}>Uur gewerkt</th>
+                    </tr></thead>
+                    <tbody>
+                      {(r.ai.dagen||[]).map((d,i)=>(
+                        <tr key={i} style={{borderBottom:"0.5px solid "+BRAND.border}}>
+                          <td style={{padding:"3px 6px",textTransform:"capitalize"}}>{d.dag}</td>
+                          <td style={{textAlign:"center",padding:"3px 6px"}}>{d.start||"— (afwezig)"}</td>
+                          <td style={{textAlign:"center",padding:"3px 6px"}}>{d.eind||"—"}</td>
+                          <td style={{textAlign:"right",padding:"3px 6px",fontWeight:600}}>{d.uren||0}u</td>
+                        </tr>
+                      ))}
+                      <tr style={{fontWeight:700}}>
+                        <td colSpan="3" style={{padding:"5px 6px",textAlign:"right"}}>Totaal gewerkt:</td>
+                        <td style={{textAlign:"right",padding:"5px 6px"}}>{r.g}u</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <div style={{fontSize:12,color:BRAND.text,lineHeight:1.7}}>
+                    <div style={{fontWeight:600,marginBottom:2}}>Waarvan binnen het werkvenster:</div>
+                    <div>🩺 Patiëntcontact: <b>{r.ai.patient}u</b></div>
+                    <div>📋 Overig werk (o.a. MT-uren, contactmomenten): <b>{r.ai.overig}u</b></div>
+                    <div>👥 Vergadering: <b>{r.ai.vergadering}u</b></div>
+                    {r.ai.npPending>0 && <div>🟠 Oranje blokken (nog niet bevestigd): <b>{r.ai.npPending}u</b> — ga naar Invoer om dit te bevestigen</div>}
+                  </div>
+                </div>
+              )}
+            </div>
           ))
       }
     </div>
