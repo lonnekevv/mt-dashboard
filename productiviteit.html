@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Productiviteit — Fyzio Totaal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.23.10/babel.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Poppins', sans-serif; background: #f6f0f4; min-height: 100vh; }
+  #root { max-width: 980px; margin: 0 auto; padding: 1rem 0.75rem 5rem; }
+
+  input[type=number], input[type=date], input[type=text], select {
+    padding: 7px 10px; border: 1px solid #e6cde0; border-radius: 6px;
+    font-family: 'Poppins', sans-serif; font-size: 14px; background: #fff; color: #2b1728;
+    min-height: 40px;
+  }
+
+  .sync-bar { display:flex; align-items:center; gap:8px; padding:8px 14px; border-radius:8px; margin-bottom:0.875rem; font-size:12px; font-weight:500; border:1px solid; }
+  .sync-bar.ok    { background:#e6f8fd; color:#0092bd; border-color:#b8ecf8; }
+  .sync-bar.error { background:#fdecea; color:#c0392b; border-color:#f5b7b1; }
+  .sync-bar.loading { background:#fef3dc; color:#b45309; border-color:#f5d98a; }
+  .sync-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .sync-dot.ok    { background:#0092bd; }
+  .sync-dot.error { background:#c0392b; }
+  .sync-dot.loading { background:#b45309; animation:pulse 1s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+  .desktop-tabs { display:flex; gap:2px; }
+  .mobile-tab-bar { display:none; position:fixed; bottom:0; left:0; right:0; background:#82176D; z-index:200; box-shadow:0 -2px 14px rgba(0,0,0,0.2); }
+  .mobile-tab-bar .tab-items { display:flex; justify-content:space-around; }
+  .mobile-tab-bar button { flex:1; background:transparent; border:none; color:rgba(255,255,255,0.55); padding:9px 4px 13px; font-family:'Poppins',sans-serif; font-size:10px; font-weight:500; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:3px; min-height:56px; }
+  .mobile-tab-bar button.active { color:#fff; }
+  .mobile-tab-bar button .ticon { font-size:20px; line-height:1; }
+  @media (max-width:680px) {
+    .desktop-tabs { display:none !important; }
+    .mobile-tab-bar { display:block; }
+    #root { padding-bottom: 4.5rem; }
+  }
+
+  .tbl-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; border-radius:10px; border:0.5px solid #e6cde0; }
+  @media (max-width:680px) { .tbl-wrap table { min-width: 480px; } }
+
+  .sel-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; background:#f6ecf3; border-radius:8px; padding:10px 14px; border:0.5px solid #e6cde0; margin-bottom:1.25rem; }
+  @media (max-width:480px) { .sel-row select, .sel-row input[type=date] { width:100%; } }
+
+  .card-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<div class="mobile-tab-bar">
+  <div class="tab-items" id="mobile-tabs"></div>
+</div>
+<script>
+function goTab(id) { if (window.__setTab) window.__setTab(id); }
+</script>
+
+<script type="text/babel">
+const { useState, useEffect, useCallback, useMemo, memo } = React;
+
+// ── SUPABASE (zelfde gedeelde project als FyzioFit, nieuwe tabel) ─────────
+const SB_URL = "https://szunargvsmtzbbnmnghc.supabase.co/rest/v1";
+const SB_KEY = "sb_publishable_EiIt1zJuqgjj-2FJ4mXTlg__kmUrPu5";
+const SB_HDR = { "apikey":SB_KEY, "Authorization":"Bearer "+SB_KEY, "Content-Type":"application/json", "Prefer":"resolution=merge-duplicates" };
+const TABLE = "productiviteit_weken";
+
+async function loadAll() {
+  const r = await fetch(SB_URL+"/"+TABLE+"?select=*&order=id.asc", { headers:SB_HDR });
+  if (!r.ok) throw new Error("HTTP "+r.status+" — bestaat de tabel '"+TABLE+"' al in Supabase?");
+  const rows = await r.json();
+  const out = {};
+  rows.forEach(row => { out[row.id] = row.data; });
+  return out;
+}
+async function saveRow(id, data) {
+  const r = await fetch(SB_URL+"/"+TABLE, {
+    method:"POST", headers:SB_HDR,
+    body: JSON.stringify({ id, data, updated_at:new Date().toISOString() })
+  });
+  if (!r.ok) { const t=await r.text(); throw new Error("HTTP "+r.status+": "+t); }
+}
+
+// ── BRAND ──────────────────────────────────────────────────────────────
+const BRAND = {
+  purple:"#82176D", purpleMid:"#9c2687", purpleLight:"#b53fa0", purplePale:"#f6ecf3", purpleBorder:"#e6cde0",
+  blue:"#00B6E8", blueDark:"#0092bd", bluePale:"#e6f8fd", blueBorder:"#b8ecf8",
+  text:"#2b1728", textMuted:"#6b4a63", border:"#e6cde0",
+  success:"#1a7a4a", successBg:"#e6f4ec",
+  danger:"#c0392b", dangerBg:"#fdecea",
+  warn:"#b45309", warnBg:"#fef3e2",
+};
+const META_ID = "_collegas";
+const DEFAULT_COLLEGAS = ["Jan Willem","Lars","Laura","Lonneke","Thomas","Julia","Jesper","Lynn"];
+
+// ── HELPERS ────────────────────────────────────────────────────────────
+function getMondayStr(d) { const day=d.getDay(),diff=d.getDate()-day+(day===0?-6:1); const m=new Date(d); m.setDate(diff); return m.toISOString().slice(0,10); }
+function formatWeekLabel(s) { const mon=new Date(s+"T00:00:00"),fri=new Date(mon); fri.setDate(mon.getDate()+4); return mon.getDate()+" – "+fri.toLocaleDateString("nl-NL",{day:"numeric",month:"long",year:"numeric"}); }
+function num(v) { const n=parseFloat(String(v).replace(",",".")); return isNaN(n)?0:n; }
+function pct(gewerkt, patient) { return gewerkt>0 ? Math.round((patient/gewerkt)*1000)/10 : null; }
+function pctColor(p) {
+  if (p==null) return BRAND.textMuted;
+  if (p>=75) return BRAND.success;
+  if (p>=55) return BRAND.warn;
+  return BRAND.danger;
+}
+function emptyRow() { return { gewerkt:"", patient:"" }; }
+function emptyForm(collegas) { const f={}; collegas.forEach(c=>{f[c]=emptyRow();}); return f; }
+
+// ── AI: agenda-screenshot → uren per categorie ────────────────────────
+function fileToBase64(file) {
+  return new Promise((resolve,reject)=>{
+    const r = new FileReader();
+    r.onload = () => resolve(r.result.split(",")[1]);
+    r.onerror = () => reject(new Error("Kon bestand niet lezen"));
+    r.readAsDataURL(file);
+  });
+}
+
+const AGENDA_PROMPT = "Je krijgt een screenshot van de weekagenda van één fysio-collega bij Fyzio Totaal. De agenda heeft vijf kolommen (maandag t/m vrijdag); de datum staat bovenaan de kolom, de dagnaam staat er direct onder.\n\n"
+  + "BELANGRIJK — TIJD AFLEZEN: de tijd die links naast een blok staat is de STARTTIJD van dat blok. De tijd die links naast het volgende blok ERONDER staat is de EINDTIJD van het blok erboven (en dus tegelijk de starttijd van de afspraak die daarna begint). Lees dus per blok altijd de tijd ernaast én de tijd van het eerstvolgende blok eronder om de duur te bepalen — neem niet zomaar aan dat een blok een vaste standaardduur heeft.\n\n"
+  + "Analyseer vervolgens alle geblokkeerde tijdvakken per dag volgens deze regels, die specifiek zijn voor deze praktijk:\n\n"
+  + "PATIËNTCONTACT (telt mee in \"patient_uren\"):\n"
+  + "- Ieder blok met het label \"Patientafspraak\" in de kleur groen (intake), paars (ZorgTopics-traject), bruin/kastanjebruin (groepsmoment/training) of blauwgroen/turquoise (huisbezoek) telt volledig mee.\n"
+  + "- \"Patientafspraak\" in het roze telt NIET hieronder — dat is een telefonisch/mail-contactmoment of informeel bezoek, zie \"overig\".\n"
+  + "- Blokken met het label \"Fyzio Training\" (bijv. \"Fyzio Training - maandag 9.15 uur\") — hierin geeft de collega zelf groepstraining aan patiënten, dus dit telt volledig mee als patiëntcontact.\n\n"
+  + "OVERIG WERK, wél gewerkt maar geen directe behandeling (telt mee in \"overig_uren\"):\n"
+  + "- Roze \"Patientafspraak\"-blokken (contactmoment via mail/telefoon of informeel bezoek).\n"
+  + "- Overige praktijkgebonden taken die een concreet tijdvak beslaan (bijv. \"Schoonmaken kamer\").\n"
+  + "- Cyaan/lichtblauwe blokken, mét of ZONDER tekst erin — dit zijn \"MT-uren\" (individueel bezig met MT-taken), telt als overig, geen patiëntcontact.\n\n"
+  + "VERGADERING (telt mee in \"vergadering_uren\"):\n"
+  + "- Donkerblauwe blokken en/of blokken met een label als \"Teamoverleg\", \"MT\" of vergelijkbaar.\n"
+  + "- Roze (of vergelijkbaar gekleurde) blokken die ALLEEN een persoonsnaam bevatten, zonder het woord \"Patientafspraak\" erbij (bijv. \"Lonneke Mayke\") — dit is een vergadermoment met die persoon, geen patiëntcontact.\n\n"
+  + "VERGADERING (telt mee in \"vergadering_uren\"):\n"
+  + "- Donkerblauwe blokken en/of blokken met een label als \"Teamoverleg\", \"MT\", \"overleg\" of vergelijkbaar.\n\n"
+  + "NIET MEETELLEN (negeer volledig, in geen enkele categorie):\n"
+  + "- Lege/grijze vakken en \"Pauze\".\n"
+  + "- Tekstregels die beginnen met een liggend streepje \"-\" en die ONDER een ander blok staan (bijv. \"- exporttabellen\", \"- schema Richard\") — dit zijn persoonlijke notities, geen tijdvakken.\n"
+  + "- \"Zaal patient\" zónder aparte \"Patientafspraak\" erbij — dat betekent alleen dat er geen kamer vrij was, niet dat er al een patiënt gepland is.\n"
+  + "- Het blok \"FysioFit uur\" zelf — dit is puur een label voor het tijdslot; tel alleen de losse bruine \"Patientafspraak\"-blokken daarbinnen.\n"
+  + "- Het blok \"performance training\" zelf — dit is, net als \"FysioFit uur\", puur een label voor het tijdslot. Dit telt ALLEEN mee als er in datzelfde tijdvak ook daadwerkelijk een \"Patientafspraak\"-blok gepland staat.\n"
+  + "- \"Aansluitend/in overleg\" (of vergelijkbare toelichting) — telt ALLEEN mee als er in datzelfde tijdvak ook daadwerkelijk een \"Patientafspraak\"-blok gepland staat; op zichzelf is het geen apart werkblok.\n\n"
+  + "ORANJE BLOKKEN MET EEN ROOD UITROEPTEKEN (❗):\n"
+  + "- Dit geldt voor ALLE oranje blokken met een rood uitroepteken, ongeacht de tekst erin (bijv. \"np\", \"plannen in overleg\", \"schoonmaken kamer\", \"laatste dag stagiaire\", etc.) — de tekst is niet betrouwbaar te classificeren vanaf de afbeelding, alleen de kleur + het uitroepteken zijn het criterium.\n"
+  + "- Het kan gaan om een vergadering, een praktijktaak, of een puur informatieve notitie — dat is niet met zekerheid vast te stellen. Tel het totaal aantal uren van ALLE oranje blokken met een rood uitroepteken apart op in het veld \"np_uren_totaal\". Reken dit NIET mee in patient_uren, overig_uren of vergadering_uren, ook niet als de tekst overtuigend klinkt.\n\n"
+  + "Bereken per categorie het totaal aantal uren op basis van start- en eindtijd van elk blok, afgerond op kwartieren (0,25 uur).\n\n"
+  + "Antwoord ALLEEN met een geldig JSON-object in exact dit formaat, zonder andere tekst of markdown-opmaak:\n"
+  + "{\"patient_uren\":0,\"overig_uren\":0,\"vergadering_uren\":0,\"np_uren_totaal\":0,\"opmerking\":\"\"}\n\n"
+  + "Het veld \"opmerking\" mag een korte (max 20 woorden) toelichting bevatten over onzekere interpretaties, anders een lege string.";
+
+async function analyzeAgendaScreenshot(base64, mediaType) {
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-6",
+      max_tokens: 1000,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "image", source: { type:"base64", media_type: mediaType || "image/png", data: base64 } },
+          { type: "text", text: AGENDA_PROMPT }
+        ]
+      }]
+    })
+  });
+  if (!response.ok) throw new Error("API-fout: HTTP "+response.status);
+  const data = await response.json();
+  const textBlock = (data.content||[]).find(b=>b.type==="text");
+  if (!textBlock) throw new Error("Geen antwoord ontvangen");
+  const clean = textBlock.text.replace(/```json|```/g,"").trim();
+  let parsed;
+  try { parsed = JSON.parse(clean); }
+  catch(e) { throw new Error("Kon de agenda niet automatisch interpreteren — vul handmatig in"); }
+  const patientU = Number(parsed.patient_uren)||0;
+  const overigU = Number(parsed.overig_uren)||0;
+  const vergaderingU = Number(parsed.vergadering_uren)||0;
+  const npU = Number(parsed.np_uren_totaal)||0;
+  return {
+    patient: Math.round(patientU*4)/4,
+    gewerkt: Math.round((patientU+overigU+vergaderingU)*4)/4,
+    np: Math.round(npU*4)/4,
+    opmerking: parsed.opmerking || ""
+  };
+}
+
+// ── SHARED STATE ─────────────────────────────────────────────────────
+const DataCtx = React.createContext({weeks:{}, collegas:DEFAULT_COLLEGAS, reload:()=>{}, syncStatus:"loading", syncMsg:""});
+
+function SyncBar({status,msg}) {
+  const labels={ok:"Gesynchroniseerd met gedeelde database",error:"Synchronisatiefout",loading:"Verbinden…"};
+  return <div className={"sync-bar "+status}><div className={"sync-dot "+status}/><span>{labels[status]}{msg?" — "+msg:""}</span></div>;
+}
+
+// ── BAR (herbruikbaar voor productiviteit%) ──────────────────────────
+function ProdBar({ label, p, sub }) {
+  const color = pctColor(p);
+  const width = p==null ? 0 : Math.min(100, Math.max(2, p));
+  return (
+    <div style={{marginBottom:10}}>
+      <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:BRAND.text,marginBottom:3}}>
+        <span style={{fontWeight:500}}>{label}</span>
+        <span style={{fontWeight:600,color}}>{p==null?"—":p+"%"}</span>
+      </div>
+      <div style={{background:BRAND.purplePale,borderRadius:6,height:10,overflow:"hidden"}}>
+        <div style={{width:width+"%",height:"100%",background:color,borderRadius:6,transition:"width .2s"}}/>
+      </div>
+      {sub && <div style={{fontSize:11,color:BRAND.textMuted,marginTop:2}}>{sub}</div>}
+    </div>
+  );
+}
+
+// ── INVOER TAB ────────────────────────────────────────────────────────
+function InvoerTab({formData,setFormData}) {
+  const {weeks,collegas,reload,syncStatus,syncMsg,addCollega} = React.useContext(DataCtx);
+  const [currentMonday,setCurrentMonday] = useState(getMondayStr(new Date()));
+  const [saved,setSaved] = useState(false);
+  const [saving,setSaving] = useState(false);
+  const [saveErr,setSaveErr] = useState("");
+  const [newCollega,setNewCollega] = useState("");
+  const [aiState,setAiState] = useState({}); // {[collega]: {status:'idle'|'loading'|'ok'|'error', msg, npDetected}}
+  const [aiFilled,setAiFilled] = useState({}); // {[collega]: true} totdat er handmatig aangepast wordt
+  const [npInput,setNpInput] = useState({}); // {[collega]: "1.5"} handmatige correctie voor 'np'-blokken
+
+  useEffect(()=>{
+    const wk = weeks[currentMonday];
+    const m = {};
+    collegas.forEach(c=>{ m[c] = (wk && wk[c]) ? {...emptyRow(),...wk[c]} : emptyRow(); });
+    setFormData(m);
+    setSaved(false);
+    setAiFilled({});
+    setAiState({});
+    setNpInput({});
+  },[currentMonday,weeks,collegas]);
+
+  const onVal=useCallback((c,field,v)=>{
+    setFormData(p=>({...p,[c]:{...p[c],[field]:v}}));
+    setSaved(false);
+    setAiFilled(p=>({...p,[c]:false}));
+  },[]);
+
+  async function persist(dataToSave) {
+    setSaving(true); setSaveErr("");
+    try { await saveRow(currentMonday, dataToSave); await reload(); setSaved(true); }
+    catch(e) { setSaveErr(e.message); }
+    finally { setSaving(false); }
+  }
+
+  async function handleSave() { await persist(formData); }
+
+  async function handleScreenshot(c, file) {
+    setAiState(p=>({...p,[c]:{status:"loading",msg:"",npDetected:0}}));
+    try {
+      const base64 = await fileToBase64(file);
+      const result = await analyzeAgendaScreenshot(base64, file.type);
+      const updated = {...formData, [c]:{ gewerkt:String(result.gewerkt), patient:String(result.patient) }};
+      setFormData(updated);
+      setAiFilled(p=>({...p,[c]:true}));
+      setAiState(p=>({...p,[c]:{status:"ok",msg:result.opmerking||"",npDetected:result.np||0}}));
+      setNpInput(p=>({...p,[c]:""}));
+      await persist(updated);
+    } catch(e) {
+      setAiState(p=>({...p,[c]:{status:"error",msg:e.message,npDetected:0}}));
+    }
+  }
+
+  async function confirmNp(c) {
+    const extra = num(npInput[c]);
+    const updated = {...formData, [c]:{...formData[c], gewerkt:String(Math.round((num(formData[c].gewerkt)+extra)*4)/4)}};
+    setFormData(updated);
+    setAiState(p=>({...p,[c]:{...p[c],npDetected:0}}));
+    await persist(updated);
+  }
+
+  function handleAddCollega() {
+    const naam = newCollega.trim();
+    if (!naam || collegas.includes(naam)) return;
+    addCollega(naam);
+    setNewCollega("");
+  }
+
+  return (
+    <div>
+      <SyncBar status={syncStatus} msg={syncMsg}/>
+      <div className="sel-row">
+        <label style={{fontSize:13,color:BRAND.textMuted,fontWeight:500}}>Week van maandag</label>
+        <input type="date" value={currentMonday} onChange={e=>{setCurrentMonday(e.target.value);setSaved(false);}}/>
+        <span style={{fontSize:12,color:BRAND.textMuted}}>{formatWeekLabel(currentMonday)}</span>
+        {weeks[currentMonday] && <span style={{padding:"2px 10px",borderRadius:20,fontSize:12,fontWeight:500,background:BRAND.bluePale,color:BRAND.blueDark}}>Eerder opgeslagen</span>}
+      </div>
+
+      <div style={{display:"flex",gap:8,alignItems:"flex-start",background:BRAND.bluePale,border:"1px solid "+BRAND.blueBorder,borderRadius:8,padding:"10px 14px",marginBottom:"0.9rem",fontSize:12,color:BRAND.blueDark}}>
+        <span>📷</span>
+        <span>Upload per collega een screenshot van de weekagenda — de AI herkent patiëntcontact, overig werk en vergaderingen op basis van Fyzio Totaal's eigen kleurcodes, en vult "Uren gewerkt" en "Uren patiëntcontact" automatisch en direct opgeslagen in. Bij oranje blokken met een uitroepteken (ongeacht de tekst erin) vraagt de tool je zelf aan te geven hoeveel daarvan echt telde als gewerkte tijd. Klopt iets niet? Pas het gewoon handmatig aan.</span>
+      </div>
+
+      <div className="tbl-wrap" style={{marginBottom:"1rem"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+          <thead><tr style={{background:BRAND.purple}}>
+            {["Collega","Screenshot","Uren gewerkt","Uren patiëntcontact","Productiviteit"].map((h,i)=>(
+              <th key={i} style={{textAlign:i===0?"left":"center",padding:"9px 10px",fontWeight:500,fontSize:12,color:"rgba(255,255,255,0.9)",whiteSpace:"nowrap"}}>{h}</th>
+            ))}
+          </tr></thead>
+          <tbody>
+            {collegas.map(c=>{
+              const row = formData[c] || emptyRow();
+              const p = pct(num(row.gewerkt), num(row.patient));
+              const st = aiState[c] || {status:"idle",msg:""};
+              return (
+                <tr key={c} style={{borderBottom:"0.5px solid "+BRAND.border}}>
+                  <td style={{padding:"8px 10px",fontWeight:500,color:BRAND.text}}>{c}</td>
+                  <td style={{textAlign:"center",padding:"6px 8px"}}>
+                    <input type="file" accept="image/*" id={"ss-"+c} style={{display:"none"}}
+                      onChange={e=>{ const f=e.target.files[0]; if(f) handleScreenshot(c,f); e.target.value=""; }}/>
+                    <button onClick={()=>document.getElementById("ss-"+c).click()} disabled={st.status==="loading"}
+                      title="Upload agenda-screenshot"
+                      style={{background:"transparent",border:"1px solid "+BRAND.blueBorder,borderRadius:6,padding:"5px 10px",fontSize:13,cursor:st.status==="loading"?"not-allowed":"pointer",color:BRAND.blueDark,fontFamily:"'Poppins',sans-serif"}}>
+                      {st.status==="loading"?"⏳":"📷"}
+                    </button>
+                    {aiFilled[c] && st.status!=="loading" && <div style={{fontSize:10,color:BRAND.blueDark,marginTop:3}}>🤖 AI-ingevuld</div>}
+                    {st.status==="error" && <div style={{fontSize:10,color:BRAND.danger,marginTop:3,maxWidth:120}}>⚠ {st.msg}</div>}
+                    {st.status==="ok" && st.msg && <div style={{fontSize:10,color:BRAND.textMuted,marginTop:3,maxWidth:120}}>ℹ {st.msg}</div>}
+                    {st.status==="ok" && st.npDetected>0 && (
+                      <div style={{fontSize:10,color:BRAND.warn,marginTop:5,background:BRAND.warnBg,border:"1px solid "+BRAND.warn,borderRadius:6,padding:"5px 6px",maxWidth:140,textAlign:"left"}}>
+                        🟠 {st.npDetected}u in oranje blokken (❗). Hoeveel telt mee als gewerkt?
+                        <div style={{display:"flex",gap:4,marginTop:4}}>
+                          <input type="number" min="0" max={st.npDetected} step="0.25" value={npInput[c]||""} placeholder="0"
+                            onChange={e=>setNpInput(p=>({...p,[c]:e.target.value}))}
+                            style={{width:44,minHeight:26,padding:"2px 4px",fontSize:11,textAlign:"center"}}/>
+                          <button onClick={()=>confirmNp(c)} style={{background:BRAND.warn,color:"#fff",border:"none",borderRadius:5,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"'Poppins',sans-serif"}}>OK</button>
+                        </div>
+                      </div>
+                    )}
+                  </td>
+                  <td style={{textAlign:"center",padding:"6px 8px"}}>
+                    <input type="number" min="0" step="0.5" value={row.gewerkt} style={{width:70,textAlign:"center"}}
+                      onChange={e=>onVal(c,"gewerkt",e.target.value)}/>
+                  </td>
+                  <td style={{textAlign:"center",padding:"6px 8px"}}>
+                    <input type="number" min="0" step="0.5" value={row.patient} style={{width:70,textAlign:"center"}}
+                      onChange={e=>onVal(c,"patient",e.target.value)}/>
+                  </td>
+                  <td style={{textAlign:"center",padding:"6px 8px",fontWeight:600,color:pctColor(p)}}>{p==null?"—":p+"%"}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:"1.25rem",flexWrap:"wrap"}}>
+        <input type="text" placeholder="Naam nieuwe collega" value={newCollega} onChange={e=>setNewCollega(e.target.value)} style={{flex:"0 1 200px"}}/>
+        <button onClick={handleAddCollega} style={{background:"transparent",border:"1px solid "+BRAND.purpleBorder,borderRadius:8,padding:"8px 14px",fontSize:12,cursor:"pointer",color:BRAND.purpleMid,fontFamily:"'Poppins',sans-serif"}}>+ Collega toevoegen</button>
+      </div>
+
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:"1.5rem"}}>
+        <button onClick={handleSave} disabled={saving} style={{background:BRAND.blueDark,color:"#fff",border:"none",borderRadius:8,padding:"9px 24px",fontSize:13,fontWeight:500,cursor:saving?"not-allowed":"pointer",opacity:saving?0.7:1,fontFamily:"'Poppins',sans-serif"}}>
+          {saving?"Opslaan…":"Opslaan"}
+        </button>
+        {saved && <span style={{fontSize:13,color:BRAND.success}}>☁ Opgeslagen en gesynchroniseerd</span>}
+        {saveErr && <span style={{fontSize:13,color:BRAND.danger}}>⚠ {saveErr}</span>}
+      </div>
+
+      <div style={{fontSize:13,fontWeight:500,color:BRAND.textMuted,marginBottom:10}}>Deze week in één oogopslag</div>
+      <div className="card-grid">
+        {collegas.map(c=>{
+          const row = formData[c] || emptyRow();
+          const p = pct(num(row.gewerkt), num(row.patient));
+          return (
+            <div key={c} style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderRadius:10,padding:"12px 14px",borderLeft:"3px solid "+pctColor(p)}}>
+              <div style={{fontSize:13,fontWeight:500,color:BRAND.text,marginBottom:4}}>{c}</div>
+              <div style={{fontSize:22,fontWeight:600,color:pctColor(p)}}>{p==null?"—":p+"%"}</div>
+              <div style={{fontSize:11,color:BRAND.textMuted}}>{num(row.patient)}u pat. / {num(row.gewerkt)}u werk</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── COLLEGA (DETAIL) TAB ─────────────────────────────────────────────
+function CollegaTab() {
+  const {weeks,collegas} = React.useContext(DataCtx);
+  const [sel,setSel] = useState(collegas[0]||"");
+  useEffect(()=>{ if(!sel && collegas.length) setSel(collegas[0]); },[collegas]);
+
+  const rows = useMemo(()=>{
+    return Object.keys(weeks).sort().reverse()
+      .filter(wk => weeks[wk] && weeks[wk][sel] && (weeks[wk][sel].gewerkt!=="" || weeks[wk][sel].patient!==""))
+      .map(wk => {
+        const r = weeks[wk][sel];
+        const g = num(r.gewerkt), pt = num(r.patient);
+        return { wk, g, pt, p: pct(g,pt) };
+      });
+  },[weeks,sel]);
+
+  const avg = useMemo(()=>{
+    const valid = rows.filter(r=>r.p!=null);
+    if (!valid.length) return null;
+    return Math.round((valid.reduce((s,r)=>s+r.p,0)/valid.length)*10)/10;
+  },[rows]);
+
+  return (
+    <div>
+      <div className="sel-row">
+        <label style={{fontSize:13,color:BRAND.textMuted,fontWeight:500}}>Collega</label>
+        <select value={sel} onChange={e=>setSel(e.target.value)}>
+          {collegas.map(c=><option key={c} value={c}>{c}</option>)}
+        </select>
+      </div>
+
+      {avg!=null && (
+        <div style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderRadius:12,padding:"16px 18px",marginBottom:"1.25rem",borderTop:"3px solid "+pctColor(avg),textAlign:"center",maxWidth:220}}>
+          <div style={{fontSize:36,fontWeight:700,color:pctColor(avg),lineHeight:1}}>{avg}%</div>
+          <div style={{fontSize:12,color:BRAND.textMuted,marginTop:4}}>Gemiddelde productiviteit ({rows.filter(r=>r.p!=null).length} weken)</div>
+        </div>
+      )}
+
+      <div style={{fontSize:13,fontWeight:500,color:BRAND.textMuted,marginBottom:10}}>Weekhistorie</div>
+      {rows.length===0
+        ? <div style={{fontSize:13,color:BRAND.textMuted,padding:"1rem"}}>Nog geen gegevens ingevoerd voor {sel}.</div>
+        : rows.map(r=>(
+            <ProdBar key={r.wk} label={formatWeekLabel(r.wk)} p={r.p} sub={r.pt+"u patiëntcontact van "+r.g+"u gewerkt"} />
+          ))
+      }
+    </div>
+  );
+}
+
+// ── TEAM TAB ──────────────────────────────────────────────────────────
+function TeamTab() {
+  const {weeks,collegas} = React.useContext(DataCtx);
+  const sortedWeeks = useMemo(()=>Object.keys(weeks).filter(k=>k!==META_ID).sort().reverse(),[weeks]);
+  const [wk,setWk] = useState("");
+  useEffect(()=>{ if(sortedWeeks.length && !wk) setWk(sortedWeeks[0]); },[sortedWeeks]);
+
+  const stats = useMemo(()=>{
+    if (!wk || !weeks[wk]) return [];
+    return collegas.map(c=>{
+      const r = weeks[wk][c] || emptyRow();
+      const g = num(r.gewerkt), pt = num(r.patient);
+      return { c, g, pt, p: pct(g,pt) };
+    }).sort((a,b)=> (b.p??-1) - (a.p??-1));
+  },[wk,weeks,collegas]);
+
+  const teamAvg = useMemo(()=>{
+    const valid = stats.filter(s=>s.p!=null);
+    if (!valid.length) return null;
+    return Math.round((valid.reduce((s,x)=>s+x.p,0)/valid.length)*10)/10;
+  },[stats]);
+
+  return (
+    <div>
+      <div className="sel-row">
+        <label style={{fontSize:13,color:BRAND.textMuted,fontWeight:500}}>Kies week</label>
+        <select value={wk} onChange={e=>setWk(e.target.value)}>
+          {!sortedWeeks.length && <option>Nog geen weken opgeslagen</option>}
+          {sortedWeeks.map(k=><option key={k} value={k}>{formatWeekLabel(k)}</option>)}
+        </select>
+      </div>
+
+      {teamAvg!=null && (
+        <div style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderRadius:12,padding:"16px 18px",marginBottom:"1.5rem",borderTop:"3px solid "+BRAND.blueDark,textAlign:"center",maxWidth:260}}>
+          <div style={{fontSize:36,fontWeight:700,color:BRAND.blueDark,lineHeight:1}}>{teamAvg}%</div>
+          <div style={{fontSize:12,color:BRAND.textMuted,marginTop:4}}>Teamgemiddelde deze week</div>
+        </div>
+      )}
+
+      <div style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderRadius:12,padding:"16px 18px"}}>
+        <div style={{fontSize:13,fontWeight:600,color:BRAND.text,marginBottom:14}}>Productiviteit per collega</div>
+        {stats.length===0
+          ? <div style={{fontSize:13,color:BRAND.textMuted}}>Nog geen data voor deze week.</div>
+          : stats.map(s=>(
+              <ProdBar key={s.c} label={s.c} p={s.p} sub={s.pt+"u patiëntcontact van "+s.g+"u gewerkt"} />
+            ))
+        }
+      </div>
+    </div>
+  );
+}
+
+// ── ROOT APP ──────────────────────────────────────────────────────────
+function App() {
+  const [tab,setTab] = useState("invoer");
+  useEffect(()=>{ window.__setTab = (id) => setTab(id); return ()=>{ delete window.__setTab; }; },[]);
+  const [formData,setFormData] = useState({});
+  const [weeks,setWeeks] = useState({});
+  const [collegas,setCollegas] = useState(DEFAULT_COLLEGAS);
+  const [syncStatus,setSyncStatus] = useState("loading");
+  const [syncMsg,setSyncMsg] = useState("");
+
+  async function reload() {
+    setSyncStatus("loading");
+    try {
+      const d = await loadAll();
+      const meta = d[META_ID];
+      setCollegas(meta && Array.isArray(meta.list) && meta.list.length ? meta.list : DEFAULT_COLLEGAS);
+      const wkData = {...d}; delete wkData[META_ID];
+      setWeeks(wkData);
+      setSyncStatus("ok"); setSyncMsg("");
+    } catch(e) {
+      setSyncStatus("error"); setSyncMsg(e.message);
+    }
+  }
+  useEffect(()=>{ reload(); },[]);
+
+  async function addCollega(naam) {
+    const list = [...collegas, naam];
+    setCollegas(list);
+    try { await saveRow(META_ID, {list}); } catch(e) { /* stil falen, lijst blijft lokaal zichtbaar */ }
+  }
+
+  const ctxValue = useMemo(()=>({weeks,collegas,reload,syncStatus,syncMsg,addCollega}),[weeks,collegas,syncStatus,syncMsg]);
+  const tabs = [
+    {id:"invoer", label:"Invoer", icon:"✏️"},
+    {id:"collega", label:"Per collega", icon:"👤"},
+    {id:"team", label:"Team", icon:"👥"},
+  ];
+
+  useEffect(()=>{
+    const bar = document.getElementById("mobile-tabs");
+    if (!bar) return;
+    bar.innerHTML = "";
+    tabs.forEach(t=>{
+      const b = document.createElement("button");
+      b.className = tab===t.id ? "active" : "";
+      b.onclick = ()=>goTab(t.id);
+      b.innerHTML = '<span class="ticon">'+t.icon+'</span>'+t.label;
+      bar.appendChild(b);
+    });
+  },[tab]);
+
+  return (
+    <DataCtx.Provider value={ctxValue}>
+      <div>
+        <div style={{background:"linear-gradient(135deg, "+BRAND.purple+" 0%, "+BRAND.purpleLight+" 100%)",padding:"18px 24px 0",borderRadius:"12px 12px 0 0"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+            <div style={{width:36,height:36,borderRadius:8,background:BRAND.blue,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20}}>📈</div>
+            <div>
+              <div style={{fontSize:16,fontWeight:600,color:"#fff"}}>Productiviteit</div>
+              <div style={{fontSize:11,color:"rgba(255,255,255,0.7)"}}>Fyzio Totaal — Uren gewerkt vs. patiëntcontact</div>
+            </div>
+            <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:6,background:"rgba(255,255,255,0.14)",borderRadius:6,padding:"4px 10px",fontSize:11,color:"rgba(255,255,255,0.8)"}}>
+              ☁ Gedeelde opslag
+            </div>
+          </div>
+          <div className="desktop-tabs">
+            {tabs.map(t=>(
+              <button key={t.id} onClick={()=>setTab(t.id)} style={{background:tab===t.id?"#fff":"transparent",border:"none",borderRadius:"8px 8px 0 0",padding:"8px 16px",fontSize:13,fontWeight:tab===t.id?500:400,color:tab===t.id?BRAND.purple:"rgba(255,255,255,0.8)",cursor:"pointer",fontFamily:"'Poppins',sans-serif"}}>
+                {t.icon} {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderTop:"none",borderRadius:"0 0 12px 12px",padding:"20px"}}>
+          {syncStatus==="loading" && !Object.keys(weeks).length
+            ? <div style={{textAlign:"center",padding:"3rem",color:BRAND.textMuted}}>Data laden uit gedeelde database…</div>
+            : <>
+                {tab==="invoer" && <InvoerTab formData={formData} setFormData={setFormData}/>}
+                {tab==="collega" && <CollegaTab/>}
+                {tab==="team" && <TeamTab/>}
+              </>
+          }
+          <div style={{marginTop:"1.5rem",paddingTop:"1rem",borderTop:"0.5px solid "+BRAND.border,display:"flex",justifyContent:"flex-end",fontSize:11,color:BRAND.textMuted,alignItems:"center",gap:6}}>
+            ☁ Gegevens worden opgeslagen in gedeelde Supabase-database
+          </div>
+        </div>
+      </div>
+    </DataCtx.Provider>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+</script>
+</body>
+</html>
