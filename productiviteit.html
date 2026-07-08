@@ -109,7 +109,7 @@ function pctColor(p) {
   if (p>=55) return BRAND.warn;
   return BRAND.danger;
 }
-function emptyRow() { return { gewerkt:"", patient:"" }; }
+function emptyRow() { return { gewerkt:"", patient:"", _ai:null }; }
 function emptyForm(collegas) { const f={}; collegas.forEach(c=>{f[c]=emptyRow();}); return f; }
 
 // ── AI: agenda-screenshot → uren per categorie ────────────────────────
@@ -274,10 +274,9 @@ function InvoerTab({formData,setFormData}) {
   const [saving,setSaving] = useState(false);
   const [saveErr,setSaveErr] = useState("");
   const [newCollega,setNewCollega] = useState("");
-  const [aiState,setAiState] = useState({}); // {[collega]: {status:'idle'|'loading'|'ok'|'error', msg, npDetected}}
-  const [aiFilled,setAiFilled] = useState({}); // {[collega]: true} totdat er handmatig aangepast wordt
+  const [aiState,setAiState] = useState({}); // {[collega]: {status:'idle'|'loading'|'error', msg}} — puur voor de actie zelf, niet persistent
   const [npInput,setNpInput] = useState({}); // {[collega]: "1.5"} handmatige correctie voor 'np'-blokken
-  const [showBreakdown,setShowBreakdown] = useState({}); // {[collega]: true}
+  const [showBreakdown,setShowBreakdown] = useState({}); // {[collega]: true} — puur UI-voorkeur, hoeft niet persistent
 
   useEffect(()=>{
     const wk = weeks[currentMonday];
@@ -285,16 +284,14 @@ function InvoerTab({formData,setFormData}) {
     collegas.forEach(c=>{ m[c] = (wk && wk[c]) ? {...emptyRow(),...wk[c]} : emptyRow(); });
     setFormData(m);
     setSaved(false);
-    setAiFilled({});
     setAiState({});
     setNpInput({});
     setShowBreakdown({});
   },[currentMonday,weeks,collegas]);
 
   const onVal=useCallback((c,field,v)=>{
-    setFormData(p=>({...p,[c]:{...p[c],[field]:v}}));
+    setFormData(p=>({...p,[c]:{...p[c],[field]:v,_ai:null}}));
     setSaved(false);
-    setAiFilled(p=>({...p,[c]:false}));
   },[]);
 
   async function persist(dataToSave) {
@@ -307,38 +304,44 @@ function InvoerTab({formData,setFormData}) {
   async function handleSave() { await persist(formData); }
 
   async function handleScreenshot(c, file) {
-    setAiState(p=>({...p,[c]:{status:"loading",msg:"",npDetected:0,breakdown:null}}));
+    setAiState(p=>({...p,[c]:{status:"loading",msg:""}}));
     try {
       const base64 = await fileToBase64(file);
       const result = await analyzeAgendaScreenshot(base64, file.type);
-      const updated = {...formData, [c]:{ gewerkt:String(result.gewerkt), patient:String(result.patient) }};
+      const updated = {...formData, [c]:{
+        gewerkt:String(result.gewerkt),
+        patient:String(result.patient),
+        _ai:{ ...result.breakdown, npPending:result.np||0, opmerking:result.opmerking||"" }
+      }};
       setFormData(updated);
-      setAiFilled(p=>({...p,[c]:true}));
-      setAiState(p=>({...p,[c]:{status:"ok",msg:result.opmerking||"",npDetected:result.np||0,breakdown:result.breakdown}}));
-      setNpInput(p=>({...p,[c]:""}));
+      setAiState(p=>({...p,[c]:{status:"ok",msg:""}}));
       await persist(updated);
     } catch(e) {
-      setAiState(p=>({...p,[c]:{status:"error",msg:e.message,npDetected:0,breakdown:null}}));
+      setAiState(p=>({...p,[c]:{status:"error",msg:e.message}}));
     }
   }
 
   async function confirmNp(c) {
     const extra = num(npInput[c]);
-    const updated = {...formData, [c]:{...formData[c], gewerkt:String(Math.round((num(formData[c].gewerkt)+extra)*4)/4)}};
+    const row = formData[c];
+    const updated = {...formData, [c]:{
+      ...row,
+      gewerkt:String(Math.round((num(row.gewerkt)+extra)*4)/4),
+      _ai: row._ai ? {...row._ai, npPending:0} : null
+    }};
     setFormData(updated);
-    setAiState(p=>({...p,[c]:{...p[c],npDetected:0}}));
     await persist(updated);
   }
 
   async function removeUpload(c) {
     const updated = {...formData, [c]: emptyRow()};
     setFormData(updated);
-    setAiFilled(p=>({...p,[c]:false}));
-    setAiState(p=>({...p,[c]:{status:"idle",msg:"",npDetected:0,breakdown:null}}));
+    setAiState(p=>({...p,[c]:{status:"idle",msg:""}}));
     setShowBreakdown(p=>({...p,[c]:false}));
     setNpInput(p=>({...p,[c]:""}));
     await persist(updated);
   }
+
 
   function handleAddCollega() {
     const naam = newCollega.trim();
@@ -385,8 +388,8 @@ function InvoerTab({formData,setFormData}) {
                       style={{background:"transparent",border:"1px solid "+BRAND.blueBorder,borderRadius:6,padding:"5px 10px",fontSize:13,cursor:st.status==="loading"?"not-allowed":"pointer",color:BRAND.blueDark,fontFamily:"'Poppins',sans-serif"}}>
                       {st.status==="loading"?"⏳":"📷"}
                     </button>
-                    {aiFilled[c] && st.status!=="loading" && (
-                      <div style={{display:"flex",alignItems:"center",gap:5,marginTop:3}}>
+                    {row._ai && st.status!=="loading" && (
+                      <div style={{display:"flex",alignItems:"center",gap:5,marginTop:3,flexWrap:"wrap"}}>
                         <span style={{fontSize:10,color:BRAND.blueDark}}>🤖 AI-ingevuld</span>
                         <button onClick={()=>removeUpload(c)} title="Verwijder deze upload"
                           style={{background:"none",border:"none",color:BRAND.danger,fontSize:10,textDecoration:"underline",cursor:"pointer",padding:0,fontFamily:"'Poppins',sans-serif"}}>
@@ -395,8 +398,8 @@ function InvoerTab({formData,setFormData}) {
                       </div>
                     )}
                     {st.status==="error" && <div style={{fontSize:10,color:BRAND.danger,marginTop:3,maxWidth:120}}>⚠ {st.msg}</div>}
-                    {st.status==="ok" && st.msg && <div style={{fontSize:10,color:BRAND.textMuted,marginTop:3,maxWidth:120}}>ℹ {st.msg}</div>}
-                    {st.status==="ok" && st.breakdown && (
+                    {row._ai && row._ai.opmerking && <div style={{fontSize:10,color:BRAND.textMuted,marginTop:3,maxWidth:120}}>ℹ {row._ai.opmerking}</div>}
+                    {row._ai && (
                       <div style={{marginTop:4}}>
                         <button onClick={()=>setShowBreakdown(p=>({...p,[c]:!p[c]}))}
                           style={{background:"none",border:"none",color:BRAND.blueDark,fontSize:10,textDecoration:"underline",cursor:"pointer",padding:0,fontFamily:"'Poppins',sans-serif"}}>
@@ -412,7 +415,7 @@ function InvoerTab({formData,setFormData}) {
                                 <th style={{textAlign:"right",padding:"1px 3px"}}>Uur</th>
                               </tr></thead>
                               <tbody>
-                                {st.breakdown.dagen.map((d,i)=>(
+                                {(row._ai.dagen||[]).map((d,i)=>(
                                   <tr key={i}>
                                     <td style={{padding:"1px 3px",textTransform:"capitalize"}}>{d.dag}</td>
                                     <td style={{textAlign:"center",padding:"1px 3px"}}>{d.start||"—"}</td>
@@ -423,20 +426,20 @@ function InvoerTab({formData,setFormData}) {
                               </tbody>
                             </table>
                             <div style={{fontSize:10,color:BRAND.text,lineHeight:1.6,borderTop:"1px solid "+BRAND.border,paddingTop:4}}>
-                              <div>Patiëntcontact: <b>{st.breakdown.patient}u</b></div>
-                              <div>Overig: <b>{st.breakdown.overig}u</b></div>
-                              <div>Vergadering: <b>{st.breakdown.vergadering}u</b></div>
-                              {st.breakdown.np>0 && <div>Oranje (❗) apart: <b>{st.breakdown.np}u</b></div>}
+                              <div>Patiëntcontact: <b>{row._ai.patient}u</b></div>
+                              <div>Overig: <b>{row._ai.overig}u</b></div>
+                              <div>Vergadering: <b>{row._ai.vergadering}u</b></div>
+                              {row._ai.npPending>0 && <div>Oranje (❗) apart: <b>{row._ai.npPending}u</b></div>}
                             </div>
                           </div>
                         )}
                       </div>
                     )}
-                    {st.status==="ok" && st.npDetected>0 && (
+                    {row._ai && row._ai.npPending>0 && (
                       <div style={{fontSize:10,color:BRAND.warn,marginTop:5,background:BRAND.warnBg,border:"1px solid "+BRAND.warn,borderRadius:6,padding:"5px 6px",maxWidth:140,textAlign:"left"}}>
-                        🟠 {st.npDetected}u in oranje blokken (❗). Hoeveel telt mee als gewerkt?
+                        🟠 {row._ai.npPending}u in oranje blokken (❗). Hoeveel telt mee als gewerkt?
                         <div style={{display:"flex",gap:4,marginTop:4}}>
-                          <input type="number" min="0" max={st.npDetected} step="0.25" value={npInput[c]||""} placeholder="0"
+                          <input type="number" min="0" max={row._ai.npPending} step="0.25" value={npInput[c]||""} placeholder="0"
                             onChange={e=>setNpInput(p=>({...p,[c]:e.target.value}))}
                             style={{width:44,minHeight:26,padding:"2px 4px",fontSize:11,textAlign:"center"}}/>
                           <button onClick={()=>confirmNp(c)} style={{background:BRAND.warn,color:"#fff",border:"none",borderRadius:5,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"'Poppins',sans-serif"}}>OK</button>
