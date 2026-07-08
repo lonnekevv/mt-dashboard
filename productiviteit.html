@@ -159,7 +159,14 @@ async function zorgVoorApiKey() {
 
 const AGENDA_PROMPT = "Je krijgt een screenshot van de weekagenda van één fysio-collega bij Fyzio Totaal. De agenda heeft vijf kolommen (maandag t/m vrijdag); de datum staat bovenaan de kolom, de dagnaam staat er direct onder.\n\n"
   + "BELANGRIJK — TIJD AFLEZEN: de tijd die links naast een blok staat is de STARTTIJD van dat blok. De tijd die links naast het volgende blok ERONDER staat is de EINDTIJD van het blok erboven (en dus tegelijk de starttijd van de afspraak die daarna begint). Lees dus per blok altijd de tijd ernaast én de tijd van het eerstvolgende blok eronder om de duur te bepalen — neem niet zomaar aan dat een blok een vaste standaardduur heeft.\n\n"
-  + "Analyseer vervolgens alle geblokkeerde tijdvakken per dag volgens deze regels, die specifiek zijn voor deze praktijk:\n\n"
+  + "STAP 1 — WERKVENSTER PER DAG BEPALEN (dit bepaalt de gewerkte uren):\n"
+  + "Grijze/lege vakken betekenen dat de collega afwezig is (niet werkt). Bepaal per dag:\n"
+  + "- STARTTIJD = de tijd die links staat naast het EERSTE niet-grijze blok van die dag.\n"
+  + "- EINDTIJD = de tijd die links staat naast het eerstvolgende grijze/lege blok NADAT de collega is begonnen (dus het moment waarop de aaneengesloten reeks werkblokken stopt en er weer een grijs vak begint).\n"
+  + "- Is een hele dag grijs/leeg? Dan werkt de collega die dag niet: start en eind zijn dan null, uren is 0.\n"
+  + "- De gewerkte tijd van die dag is EINDTIJD minus STARTTIJD (dit is dus de hele aanwezigheidstijd, inclusief eventuele korte tussenpozen zoals kort wachten tussen twee afspraken — niet alleen de losse geboekte blokken).\n"
+  + "Zet dit resultaat in het veld \"dagen\": een array met exact 5 objecten (maandag t/m vrijdag), elk met \"dag\", \"start\" (of null), \"eind\" (of null) en \"uren\" (afgerond op kwartieren).\n\n"
+  + "STAP 2 — CATEGORISEER de blokken BINNEN het werkvenster van elke dag (dit is alleen voor de uitsplitsing, telt niet nogmaals op bij de gewerkte uren):\n\n"
   + "PATIËNTCONTACT (telt mee in \"patient_uren\"):\n"
   + "- Ieder blok met het label \"Patientafspraak\" in de kleur groen (intake), paars (ZorgTopics-traject), bruin/kastanjebruin (groepsmoment/training) of blauwgroen/turquoise (huisbezoek) telt volledig mee.\n"
   + "- \"Patientafspraak\" in het roze telt NIET hieronder — dat is een telefonisch/mail-contactmoment of informeel bezoek, zie \"overig\".\n"
@@ -172,18 +179,18 @@ const AGENDA_PROMPT = "Je krijgt een screenshot van de weekagenda van één fysi
   + "- Donkerblauwe blokken en/of blokken met een label als \"Teamoverleg\", \"MT\" of vergelijkbaar.\n"
   + "- Roze (of vergelijkbaar gekleurde) blokken die ALLEEN een persoonsnaam bevatten, zonder het woord \"Patientafspraak\" erbij (bijv. \"Lonneke Mayke\") — dit is een vergadermoment met die persoon, geen patiëntcontact.\n\n"
   + "NIET MEETELLEN (negeer volledig, in geen enkele categorie):\n"
-  + "- Lege/grijze vakken en \"Pauze\".\n"
+  + "- Grijze/lege vakken en \"Pauze\" (deze bepalen wel het werkvenster uit stap 1, maar tellen zelf niet als categorie).\n"
   + "- Tekstregels die beginnen met een liggend streepje \"-\" en die ONDER een ander blok staan (bijv. \"- exporttabellen\", \"- schema Richard\") — dit zijn persoonlijke notities, geen tijdvakken.\n"
   + "- \"Zaal patient\" zónder aparte \"Patientafspraak\" erbij — dat betekent alleen dat er geen kamer vrij was, niet dat er al een patiënt gepland is.\n"
   + "- Het blok \"FysioFit uur\" zelf — dit is puur een label voor het tijdslot; tel alleen de losse bruine \"Patientafspraak\"-blokken daarbinnen.\n"
   + "- Het blok \"performance training\" zelf — dit is, net als \"FysioFit uur\", puur een label voor het tijdslot. Dit telt ALLEEN mee als er in datzelfde tijdvak ook daadwerkelijk een \"Patientafspraak\"-blok gepland staat.\n"
-  + "- \"Aansluitend/in overleg\" (of vergelijkbare toelichting) — telt ALLEEN mee als er in datzelfde tijdvak ook daadwerkelijk een \"Patientafspraak\"-blok gepland staat; op zichzelf is het geen apart werkblok.\n\n"
-  + "ORANJE BLOKKEN MET EEN ROOD UITROEPTEKEN (❗):\n"
-  + "- Dit geldt voor ALLE oranje blokken met een rood uitroepteken, ongeacht de tekst erin (bijv. \"np\", \"plannen in overleg\", \"schoonmaken kamer\", \"laatste dag stagiaire\", etc.) — de tekst is niet betrouwbaar te classificeren vanaf de afbeelding, alleen de kleur + het uitroepteken zijn het criterium.\n"
-  + "- Het kan gaan om een vergadering, een praktijktaak, of een puur informatieve notitie — dat is niet met zekerheid vast te stellen. Tel het totaal aantal uren van ALLE oranje blokken met een rood uitroepteken apart op in het veld \"np_uren_totaal\". Reken dit NIET mee in patient_uren, overig_uren of vergadering_uren, ook niet als de tekst overtuigend klinkt.\n\n"
-  + "Bereken per categorie het totaal aantal uren op basis van start- en eindtijd van elk blok, afgerond op kwartieren (0,25 uur).\n\n"
+  + "- \"Aansluitend/in overleg\" (of vergelijkbare toelichting) — telt ALLEEN mee als er in datzelfde tijdvak ook daadwerkelijk een \"Patientafspraak\"-blok gepland staat; op zichzelf is het geen apart werkblok.\n"
+  + "- Oranje blokken met een rood uitroepteken die VÓÓR de STARTTIJD van de werkdag liggen (dus vóór het eerste niet-grijze blok van die dag) — dit zijn persoonlijke notities/reminders van vóór werktijd. Negeer deze volledig, tel ze NERGENS in mee, ook niet in np_uren_totaal.\n\n"
+  + "ORANJE BLOKKEN MET EEN ROOD UITROEPTEKEN BINNEN het werkvenster:\n"
+  + "- Dit geldt voor ALLE oranje blokken met een rood uitroepteken die WEL binnen het werkvenster vallen, ongeacht de tekst erin (bijv. \"np\", \"plannen in overleg\", \"schoonmaken kamer\", \"laatste dag stagiaire\", etc.) — de tekst is niet betrouwbaar te classificeren vanaf de afbeelding, alleen de kleur + het uitroepteken zijn het criterium.\n"
+  + "- Het kan gaan om een vergadering, een praktijktaak, of een puur informatieve notitie — dat is niet met zekerheid vast te stellen. Tel het totaal aantal uren van deze oranje blokken apart op in het veld \"np_uren_totaal\". Reken dit NIET mee in patient_uren, overig_uren of vergadering_uren, ook niet als de tekst overtuigend klinkt.\n\n"
   + "Antwoord ALLEEN met een geldig JSON-object in exact dit formaat, zonder andere tekst of markdown-opmaak:\n"
-  + "{\"patient_uren\":0,\"overig_uren\":0,\"vergadering_uren\":0,\"np_uren_totaal\":0,\"opmerking\":\"\"}\n\n"
+  + "{\"dagen\":[{\"dag\":\"maandag\",\"start\":\"07:35\",\"eind\":\"16:35\",\"uren\":9},{\"dag\":\"dinsdag\",\"start\":null,\"eind\":null,\"uren\":0},{\"dag\":\"woensdag\",\"start\":null,\"eind\":null,\"uren\":0},{\"dag\":\"donderdag\",\"start\":null,\"eind\":null,\"uren\":0},{\"dag\":\"vrijdag\",\"start\":null,\"eind\":null,\"uren\":0}],\"patient_uren\":0,\"overig_uren\":0,\"vergadering_uren\":0,\"np_uren_totaal\":0,\"opmerking\":\"\"}\n\n"
   + "Het veld \"opmerking\" mag een korte (max 20 woorden) toelichting bevatten over onzekere interpretaties, anders een lege string.";
 
 async function analyzeAgendaScreenshot(base64, mediaType) {
@@ -198,7 +205,7 @@ async function analyzeAgendaScreenshot(base64, mediaType) {
     },
     body: JSON.stringify({
       model: "claude-sonnet-4-5",
-      max_tokens: 1000,
+      max_tokens: 1500,
       messages: [{
         role: "user",
         content: [
@@ -218,15 +225,18 @@ async function analyzeAgendaScreenshot(base64, mediaType) {
   let parsed;
   try { parsed = JSON.parse(clean); }
   catch(e) { throw new Error("Kon de agenda niet automatisch interpreteren — vul handmatig in"); }
+  const dagen = Array.isArray(parsed.dagen) ? parsed.dagen : [];
+  const gewerktTotaal = dagen.reduce((s,d)=>s+(Number(d.uren)||0),0);
   const patientU = Number(parsed.patient_uren)||0;
   const overigU = Number(parsed.overig_uren)||0;
   const vergaderingU = Number(parsed.vergadering_uren)||0;
   const npU = Number(parsed.np_uren_totaal)||0;
   return {
     patient: Math.round(patientU*4)/4,
-    gewerkt: Math.round((patientU+overigU+vergaderingU)*4)/4,
+    gewerkt: Math.round(gewerktTotaal*4)/4,
     np: Math.round(npU*4)/4,
-    opmerking: parsed.opmerking || ""
+    opmerking: parsed.opmerking || "",
+    breakdown: { dagen, patient: patientU, overig: overigU, vergadering: vergaderingU, np: npU }
   };
 }
 
@@ -267,6 +277,7 @@ function InvoerTab({formData,setFormData}) {
   const [aiState,setAiState] = useState({}); // {[collega]: {status:'idle'|'loading'|'ok'|'error', msg, npDetected}}
   const [aiFilled,setAiFilled] = useState({}); // {[collega]: true} totdat er handmatig aangepast wordt
   const [npInput,setNpInput] = useState({}); // {[collega]: "1.5"} handmatige correctie voor 'np'-blokken
+  const [showBreakdown,setShowBreakdown] = useState({}); // {[collega]: true}
 
   useEffect(()=>{
     const wk = weeks[currentMonday];
@@ -277,6 +288,7 @@ function InvoerTab({formData,setFormData}) {
     setAiFilled({});
     setAiState({});
     setNpInput({});
+    setShowBreakdown({});
   },[currentMonday,weeks,collegas]);
 
   const onVal=useCallback((c,field,v)=>{
@@ -295,18 +307,18 @@ function InvoerTab({formData,setFormData}) {
   async function handleSave() { await persist(formData); }
 
   async function handleScreenshot(c, file) {
-    setAiState(p=>({...p,[c]:{status:"loading",msg:"",npDetected:0}}));
+    setAiState(p=>({...p,[c]:{status:"loading",msg:"",npDetected:0,breakdown:null}}));
     try {
       const base64 = await fileToBase64(file);
       const result = await analyzeAgendaScreenshot(base64, file.type);
       const updated = {...formData, [c]:{ gewerkt:String(result.gewerkt), patient:String(result.patient) }};
       setFormData(updated);
       setAiFilled(p=>({...p,[c]:true}));
-      setAiState(p=>({...p,[c]:{status:"ok",msg:result.opmerking||"",npDetected:result.np||0}}));
+      setAiState(p=>({...p,[c]:{status:"ok",msg:result.opmerking||"",npDetected:result.np||0,breakdown:result.breakdown}}));
       setNpInput(p=>({...p,[c]:""}));
       await persist(updated);
     } catch(e) {
-      setAiState(p=>({...p,[c]:{status:"error",msg:e.message,npDetected:0}}));
+      setAiState(p=>({...p,[c]:{status:"error",msg:e.message,npDetected:0,breakdown:null}}));
     }
   }
 
@@ -366,6 +378,42 @@ function InvoerTab({formData,setFormData}) {
                     {aiFilled[c] && st.status!=="loading" && <div style={{fontSize:10,color:BRAND.blueDark,marginTop:3}}>🤖 AI-ingevuld</div>}
                     {st.status==="error" && <div style={{fontSize:10,color:BRAND.danger,marginTop:3,maxWidth:120}}>⚠ {st.msg}</div>}
                     {st.status==="ok" && st.msg && <div style={{fontSize:10,color:BRAND.textMuted,marginTop:3,maxWidth:120}}>ℹ {st.msg}</div>}
+                    {st.status==="ok" && st.breakdown && (
+                      <div style={{marginTop:4}}>
+                        <button onClick={()=>setShowBreakdown(p=>({...p,[c]:!p[c]}))}
+                          style={{background:"none",border:"none",color:BRAND.blueDark,fontSize:10,textDecoration:"underline",cursor:"pointer",padding:0,fontFamily:"'Poppins',sans-serif"}}>
+                          {showBreakdown[c] ? "Verberg uitsplitsing" : "Toon uitsplitsing"}
+                        </button>
+                        {showBreakdown[c] && (
+                          <div style={{marginTop:5,background:"#fff",border:"1px solid "+BRAND.border,borderRadius:6,padding:"6px 8px",maxWidth:190,textAlign:"left"}}>
+                            <table style={{fontSize:10,borderCollapse:"collapse",width:"100%",marginBottom:5}}>
+                              <thead><tr style={{color:BRAND.textMuted}}>
+                                <th style={{textAlign:"left",padding:"1px 3px"}}>Dag</th>
+                                <th style={{textAlign:"center",padding:"1px 3px"}}>Van</th>
+                                <th style={{textAlign:"center",padding:"1px 3px"}}>Tot</th>
+                                <th style={{textAlign:"right",padding:"1px 3px"}}>Uur</th>
+                              </tr></thead>
+                              <tbody>
+                                {st.breakdown.dagen.map((d,i)=>(
+                                  <tr key={i}>
+                                    <td style={{padding:"1px 3px",textTransform:"capitalize"}}>{d.dag}</td>
+                                    <td style={{textAlign:"center",padding:"1px 3px"}}>{d.start||"—"}</td>
+                                    <td style={{textAlign:"center",padding:"1px 3px"}}>{d.eind||"—"}</td>
+                                    <td style={{textAlign:"right",padding:"1px 3px"}}>{d.uren||0}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                            <div style={{fontSize:10,color:BRAND.text,lineHeight:1.6,borderTop:"1px solid "+BRAND.border,paddingTop:4}}>
+                              <div>Patiëntcontact: <b>{st.breakdown.patient}u</b></div>
+                              <div>Overig: <b>{st.breakdown.overig}u</b></div>
+                              <div>Vergadering: <b>{st.breakdown.vergadering}u</b></div>
+                              {st.breakdown.np>0 && <div>Oranje (❗) apart: <b>{st.breakdown.np}u</b></div>}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     {st.status==="ok" && st.npDetected>0 && (
                       <div style={{fontSize:10,color:BRAND.warn,marginTop:5,background:BRAND.warnBg,border:"1px solid "+BRAND.warn,borderRadius:6,padding:"5px 6px",maxWidth:140,textAlign:"left"}}>
                         🟠 {st.npDetected}u in oranje blokken (❗). Hoeveel telt mee als gewerkt?
