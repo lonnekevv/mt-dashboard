@@ -157,45 +157,48 @@ async function zorgVoorApiKey() {
   return key;
 }
 
-const AGENDA_PROMPT = "Je krijgt een screenshot van de weekagenda van één fysio-collega bij Fyzio Totaal. De agenda heeft vijf kolommen (maandag t/m vrijdag); de datum staat bovenaan de kolom, de dagnaam staat er direct onder.\n\n"
-  + "BELANGRIJK — TIJD AFLEZEN: de tijd die links naast een blok staat is de STARTTIJD van dat blok. De tijd die links naast het volgende blok ERONDER staat is de EINDTIJD van het blok erboven (en dus tegelijk de starttijd van de afspraak die daarna begint). Lees dus per blok altijd de tijd ernaast én de tijd van het eerstvolgende blok eronder om de duur te bepalen — neem niet zomaar aan dat een blok een vaste standaardduur heeft.\n\n"
-  + "STAP 1 — WERKVENSTER PER DAG BEPALEN (dit bepaalt de gewerkte uren) — LEES DIT ZEER NAUWKEURIG:\n"
-  + "Er zijn TWEE totaal verschillende soorten lege vakken in deze agenda, en ze worden vaak verward:\n"
-  + "  (a) GRIJS GEVULDE vakken (een duidelijk grijze/donkere achtergrondkleur, zonder tekst) = de collega is AFWEZIG: niet aanwezig, niet betaald, niet gewerkt.\n"
-  + "  (b) WITTE/BLANCO vakken (geen achtergrondkleur, alleen een dun randlijntje, geen tekst) = de collega IS AANWEZIG maar heeft op dat moment geen patiënt: dit telt gewoon mee als gewerkte tijd (net als een blok mét een afspraak).\n"
-  + "Verwar deze twee NOOIT met elkaar. Vergelijk een twijfelachtig vak met de vakken rondom het begin en einde van de dag: grijze afwezigheidsvakken zitten vrijwel altijd alleen helemaal aan het BEGIN van de dag (vroege ochtend, vóórdat iemand is begonnen) en/of helemaal aan het EIND van de dag (late avond, nadat iemand weg is) — in het midden van de werkdag zijn lege vakken zo goed als altijd wit/blanco (aanwezig, geen patiënt), NIET grijs.\n"
-  + "Bepaal per dag PRECIES ÉÉN overgang van grijs naar niet-grijs, en PRECIES ÉÉN overgang terug van niet-grijs naar grijs (verderop diezelfde dag):\n"
-  + "- STARTTIJD = de tijd die links staat naast het EERSTE vak van de dag dat niet grijs-gevuld is (dit kan een wit/blanco vak zijn óf een gekleurd/tekst-vak — als het niet die grijze afwezigheidskleur heeft, telt het als begin van de werkdag).\n"
-  + "- EINDTIJD = de tijd die links staat naast het eerstvolgende GRIJS-GEVULDE vak dat je tegenkomt nadat de collega is begonnen. Zoek dit vak pas op nadat je zeker weet dat het echt grijs-gevuld is (en niet wit/blanco) — twijfel je, kijk dan of de vakken ERNA ook allemaal grijs blijven tot het einde van de agenda; zo ja, dan heb je het juiste eindpunt te pakken.\n"
-  + "- Alles tussen STARTTIJD en EINDTIJD telt mee als gewerkte tijd, inclusief eventuele witte/blanco tussenvakken zonder patiënt — dit is één aaneengesloten aanwezigheidsblok, ook al zit er geen patiëntafspraak in elk vakje.\n"
-  + "- Is een hele dag grijs-gevuld (geen enkel wit of gekleurd vak)? Dan werkt de collega die dag niet: start en eind zijn dan null, uren is 0.\n"
-  + "Zet dit resultaat in het veld \"dagen\": een array met exact 5 objecten (maandag t/m vrijdag), elk met \"dag\", \"start\" (of null), \"eind\" (of null) en \"uren\" (afgerond op kwartieren).\n\n"
-  + "STAP 2 — CATEGORISEER de blokken BINNEN het werkvenster van elke dag (dit is alleen voor de uitsplitsing, telt niet nogmaals op bij de gewerkte uren):\n\n"
-  + "PATIËNTCONTACT (telt mee in \"patient_uren\"):\n"
-  + "- Ieder blok met het label \"Patientafspraak\" in de kleur groen (intake), paars (ZorgTopics-traject), bruin/kastanjebruin (groepsmoment/training) of blauwgroen/turquoise (huisbezoek) telt volledig mee.\n"
-  + "- \"Patientafspraak\" in het roze telt NIET hieronder — dat is een telefonisch/mail-contactmoment of informeel bezoek, zie \"overig\".\n"
-  + "- Blokken met het label \"Fyzio Training\" (bijv. \"Fyzio Training - maandag 9.15 uur\") — hierin geeft de collega zelf groepstraining aan patiënten, dus dit telt volledig mee als patiëntcontact.\n\n"
-  + "OVERIG WERK, wél gewerkt maar geen directe behandeling (telt mee in \"overig_uren\"):\n"
-  + "- Roze \"Patientafspraak\"-blokken (contactmoment via mail/telefoon of informeel bezoek).\n"
-  + "- Overige praktijkgebonden taken die een concreet tijdvak beslaan (bijv. \"Schoonmaken kamer\").\n"
-  + "- Cyaan/lichtblauwe blokken, mét of ZONDER tekst erin — dit zijn \"MT-uren\" (individueel bezig met MT-taken), telt als overig, geen patiëntcontact.\n\n"
-  + "VERGADERING (telt mee in \"vergadering_uren\"):\n"
-  + "- Donkerblauwe blokken en/of blokken met een label als \"Teamoverleg\", \"MT\" of vergelijkbaar.\n"
-  + "- Roze (of vergelijkbaar gekleurde) blokken die ALLEEN een persoonsnaam bevatten, zonder het woord \"Patientafspraak\" erbij (bijv. \"Lonneke Mayke\") — dit is een vergadermoment met die persoon, geen patiëntcontact.\n\n"
-  + "NIET MEETELLEN (negeer volledig, in geen enkele categorie):\n"
-  + "- Grijs-gevulde afwezigheidsvakken en \"Pauze\" (deze bepalen wel het werkvenster uit stap 1, maar tellen zelf niet als categorie). Witte/blanco vakken zonder patiënt tellen ook in GEEN van de categorieën hieronder mee (ze vallen simpelweg binnen het werkvenster uit stap 1 als 'aanwezig, geen patiënt').\n"
-  + "- Tekstregels die beginnen met een liggend streepje \"-\" en die ONDER een ander blok staan (bijv. \"- exporttabellen\", \"- schema Richard\") — dit zijn persoonlijke notities, geen tijdvakken.\n"
-  + "- \"Zaal patient\" zónder aparte \"Patientafspraak\" erbij — dat betekent alleen dat er geen kamer vrij was, niet dat er al een patiënt gepland is.\n"
-  + "- Het blok \"FysioFit uur\" zelf — dit is puur een label voor het tijdslot; tel alleen de losse bruine \"Patientafspraak\"-blokken daarbinnen.\n"
-  + "- Het blok \"performance training\" zelf — dit is, net als \"FysioFit uur\", puur een label voor het tijdslot. Dit telt ALLEEN mee als er in datzelfde tijdvak ook daadwerkelijk een \"Patientafspraak\"-blok gepland staat.\n"
-  + "- \"Aansluitend/in overleg\" (of vergelijkbare toelichting) — telt ALLEEN mee als er in datzelfde tijdvak ook daadwerkelijk een \"Patientafspraak\"-blok gepland staat; op zichzelf is het geen apart werkblok.\n"
-  + "- Oranje blokken met een rood uitroepteken die VÓÓR de STARTTIJD van de werkdag liggen (dus vóór het eerste niet-grijze blok van die dag) — dit zijn persoonlijke notities/reminders van vóór werktijd. Negeer deze volledig, tel ze NERGENS in mee, ook niet in np_uren_totaal.\n\n"
-  + "ORANJE BLOKKEN MET EEN ROOD UITROEPTEKEN BINNEN het werkvenster:\n"
-  + "- Dit geldt voor ALLE oranje blokken met een rood uitroepteken die WEL binnen het werkvenster vallen, ongeacht de tekst erin (bijv. \"np\", \"plannen in overleg\", \"schoonmaken kamer\", \"laatste dag stagiaire\", etc.) — de tekst is niet betrouwbaar te classificeren vanaf de afbeelding, alleen de kleur + het uitroepteken zijn het criterium.\n"
-  + "- Het kan gaan om een vergadering, een praktijktaak, of een puur informatieve notitie — dat is niet met zekerheid vast te stellen. Tel het totaal aantal uren van deze oranje blokken apart op in het veld \"np_uren_totaal\". Reken dit NIET mee in patient_uren, overig_uren of vergadering_uren, ook niet als de tekst overtuigend klinkt.\n\n"
-  + "Antwoord ALLEEN met een geldig JSON-object in exact dit formaat, zonder andere tekst of markdown-opmaak:\n"
-  + "{\"dagen\":[{\"dag\":\"maandag\",\"start\":\"07:35\",\"eind\":\"16:35\",\"uren\":9},{\"dag\":\"dinsdag\",\"start\":null,\"eind\":null,\"uren\":0},{\"dag\":\"woensdag\",\"start\":null,\"eind\":null,\"uren\":0},{\"dag\":\"donderdag\",\"start\":null,\"eind\":null,\"uren\":0},{\"dag\":\"vrijdag\",\"start\":null,\"eind\":null,\"uren\":0}],\"patient_uren\":0,\"overig_uren\":0,\"vergadering_uren\":0,\"np_uren_totaal\":0,\"opmerking\":\"\"}\n\n"
+const AGENDA_PROMPT = "Je krijgt een screenshot van de weekagenda van één fysio-collega bij Fyzio Totaal. De agenda heeft vijf kolommen (maandag t/m vrijdag); de datum staat bovenaan de kolom, de dagnaam staat er direct onder. Elke rij heeft links een tijdstip en rechts een blok dat duurt tot het volgende tijdstip.\n\n"
+  + "Jouw taak is NIET om zelf uren te berekenen — dat doet code achteraf. Jouw taak is puur: loop per dag van boven naar beneden en noteer voor ELK tijdstip waarop een nieuw blok begint, de tijd en de status van dat blok. Dit is een simpele classificatie per regel, geen rekenwerk.\n\n"
+  + "Status is precies één van deze 6 waarden:\n"
+  + "- \"grijs\": het blok heeft een duidelijk grijze/donkere vulling en bevat geen tekst. Dit betekent: collega is AFWEZIG. Grijze blokken zitten vrijwel altijd alleen aan het begin van de dag (vóór aankomst) en aan het eind van de dag (na vertrek) — bijna nooit verspreid in het midden.\n"
+  + "- \"wit\": het blok is wit/blanco (geen achtergrondkleur, hooguit een dun randlijntje), met of zonder een neutraal label zoals \"Zaal patient\". Dit betekent: collega is AANWEZIG maar heeft geen patiënt. Dit is de meest voorkomende status voor lege vakken IN het midden van de dag.\n"
+  + "- \"patient\": een \"Patientafspraak\"-blok in groen, paars, bruin/kastanje of blauwgroen/turquoise, of \"Fyzio Training\"/\"performance training\" met een daadwerkelijke patiëntafspraak erbij.\n"
+  + "- \"overig\": een roze \"Patientafspraak\"-blok (contactmoment), een cyaan/lichtblauw blok (MT-uren, met of zonder tekst), of een andere praktijktaak met een eigen tijdvak (bijv. \"Schoonmaken kamer\").\n"
+  + "- \"vergadering\": een donkerblauw blok, een blok met label \"Teamoverleg\"/\"MT\", of een blok dat ALLEEN een persoonsnaam bevat zonder \"Patientafspraak\".\n"
+  + "- \"oranje\": een oranje blok met een rood uitroepteken, ongeacht de tekst erin.\n\n"
+  + "Behandel \"Pauze\"-blokken als \"wit\" tenzij ze een duidelijk grijze vulling hebben (dan \"grijs\"). Sla tekstregels die beginnen met \"-\" en die ONDER een ander blok staan volledig over — dat zijn persoonlijke notities, geen blokken. Sla ook het label \"FysioFit uur\" zelf over als het geen eigen patiëntafspraak-blok bevat (behandel dat tijdstip dan als \"wit\").\n\n"
+  + "Maak per dag een array \"blokken\" met ALLE tijdstippen in chronologische volgorde inclusief het allerlaatste zichtbare tijdstip onderaan de kolom (dat laatste element dient alleen als eindmarkering, de status ervan maakt niet uit). Formaat per element: {\"tijd\":\"07:35\",\"status\":\"wit\"}.\n\n"
+  + "Antwoord ALLEEN met een geldig JSON-object in dit formaat, zonder andere tekst of markdown-opmaak:\n"
+  + "{\"dagen\":[{\"dag\":\"maandag\",\"blokken\":[{\"tijd\":\"07:00\",\"status\":\"grijs\"},{\"tijd\":\"07:35\",\"status\":\"wit\"},{\"tijd\":\"08:25\",\"status\":\"patient\"}]},{\"dag\":\"dinsdag\",\"blokken\":[]},{\"dag\":\"woensdag\",\"blokken\":[]},{\"dag\":\"donderdag\",\"blokken\":[]},{\"dag\":\"vrijdag\",\"blokken\":[]}],\"opmerking\":\"\"}\n\n"
   + "Het veld \"opmerking\" mag een korte (max 20 woorden) toelichting bevatten over onzekere interpretaties, anders een lege string.";
+
+function parseTijd(t) { const parts=String(t).split(":"); return (parseInt(parts[0],10)||0)*60+(parseInt(parts[1],10)||0); }
+
+function verwerkDag(blokken) {
+  if (!Array.isArray(blokken) || blokken.length===0) return {start:null,eind:null,uren:0,patient:0,overig:0,vergadering:0,oranje:0};
+  const startIdx = blokken.findIndex(b=>b.status!=="grijs");
+  if (startIdx===-1) return {start:null,eind:null,uren:0,patient:0,overig:0,vergadering:0,oranje:0};
+  let endIdx=-1;
+  for (let i=startIdx+1;i<blokken.length;i++){ if (blokken[i].status==="grijs"){ endIdx=i; break; } }
+  if (endIdx===-1) endIdx = blokken.length-1;
+  const startMin = parseTijd(blokken[startIdx].tijd);
+  const eindMin = parseTijd(blokken[endIdx].tijd);
+  const uren = Math.max(0, Math.round(((eindMin-startMin)/60)*4)/4);
+  let patient=0, overig=0, vergadering=0, oranje=0;
+  for (let i=startIdx;i<endIdx;i++){
+    const dur = Math.max(0,(parseTijd(blokken[i+1].tijd)-parseTijd(blokken[i].tijd))/60);
+    const st = blokken[i].status;
+    if (st==="patient") patient+=dur;
+    else if (st==="overig") overig+=dur;
+    else if (st==="vergadering") vergadering+=dur;
+    else if (st==="oranje") oranje+=dur;
+  }
+  return {
+    start: blokken[startIdx].tijd, eind: blokken[endIdx].tijd, uren,
+    patient: Math.round(patient*4)/4, overig: Math.round(overig*4)/4,
+    vergadering: Math.round(vergadering*4)/4, oranje: Math.round(oranje*4)/4
+  };
+}
 
 async function analyzeAgendaScreenshot(base64, mediaType) {
   const apiKey = await zorgVoorApiKey();
@@ -209,7 +212,7 @@ async function analyzeAgendaScreenshot(base64, mediaType) {
     },
     body: JSON.stringify({
       model: "claude-sonnet-4-5",
-      max_tokens: 1500,
+      max_tokens: 2000,
       messages: [{
         role: "user",
         content: [
@@ -229,13 +232,15 @@ async function analyzeAgendaScreenshot(base64, mediaType) {
   let parsed;
   try { parsed = JSON.parse(clean); }
   catch(e) { throw new Error("Kon de agenda niet automatisch interpreteren — vul handmatig in"); }
-  const dagen = Array.isArray(parsed.dagen) ? parsed.dagen : [];
-  const gewerktTotaal = dagen.reduce((s,d)=>s+(Number(d.uren)||0),0);
-  const patientU = Number(parsed.patient_uren)||0;
-  const overigU = Number(parsed.overig_uren)||0;
-  const vergaderingU = Number(parsed.vergadering_uren)||0;
-  const npU = Number(parsed.np_uren_totaal)||0;
+  const dagenRaw = Array.isArray(parsed.dagen) ? parsed.dagen : [];
+  const dagen = dagenRaw.map(d => ({ dag: d.dag, ...verwerkDag(d.blokken) }));
+  const gewerktTotaal = dagen.reduce((s,d)=>s+d.uren,0);
+  const patientU = dagen.reduce((s,d)=>s+d.patient,0);
+  const overigU = dagen.reduce((s,d)=>s+d.overig,0);
+  const vergaderingU = dagen.reduce((s,d)=>s+d.vergadering,0);
+  const npU = dagen.reduce((s,d)=>s+d.oranje,0);
   return {
+
     patient: Math.round(patientU*4)/4,
     gewerkt: Math.round(gewerktTotaal*4)/4,
     np: Math.round(npU*4)/4,
