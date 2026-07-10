@@ -247,6 +247,7 @@ async function zorgVoorApiKey() {
 
 const AGENDA_PROMPT_INTRO = "Je krijgt een screenshot van de weekagenda van één fysio-collega bij Fyzio Totaal. De agenda heeft vijf kolommen (maandag t/m vrijdag); de datum staat bovenaan de kolom, de dagnaam staat er direct onder. Elke rij heeft links een tijdstip en rechts een blok dat duurt tot het volgende tijdstip.\n\n"
   + "De begin- en eindtijd van de werkdag hoef je NIET te bepalen (dat komt uit een vast rooster). Jouw enige taak is: classificeer elk blok in de agenda op basis van zijn achtergrondkleur, aan de hand van de EXACTE kleurenlijst hieronder. Vergelijk de kleur van elk blok met deze lijst en kies de dichtstbijzijnde match.\n\n"
+  + "BELANGRIJK: blokken ZONDER tekst tellen net zo goed mee als blokken met tekst — classificeer puur op de achtergrondkleur, ook als het vak leeg oogt. \"MT-uren\" (#0AFFFF, een felle cyaan/turkoois) zijn bijvoorbeeld vaak volledig blanco maar hebben wél die duidelijke cyaan kleur — mis deze niet en verwar ze niet met \"FyzioFit uur\" (#AB7DBF, een dof grijspaars), dat is een heel andere, veel minder felle kleur.\n\n"
   + "KLEURENLIJST (hexcode → betekenis → categorie):\n";
 
 function bouwLegendaTekst() {
