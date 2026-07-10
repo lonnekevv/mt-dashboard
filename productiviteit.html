@@ -167,7 +167,7 @@ const AGENDA_PROMPT = "Je krijgt een screenshot van de weekagenda van één fysi
   + "- \"vergadering\": een donkerblauw blok, een blok met label \"Teamoverleg\"/\"MT\", of een blok dat ALLEEN een persoonsnaam bevat zonder \"Patientafspraak\".\n"
   + "- \"oranje\": een oranje blok met een rood uitroepteken, ongeacht de tekst erin.\n\n"
   + "Behandel \"Pauze\"-blokken als \"wit\" tenzij ze een duidelijk grijze vulling hebben (dan \"grijs\"). Sla tekstregels die beginnen met \"-\" en die ONDER een ander blok staan volledig over — dat zijn persoonlijke notities, geen blokken. Sla ook het label \"FysioFit uur\" zelf over als het geen eigen patiëntafspraak-blok bevat (behandel dat tijdstip dan als \"wit\").\n\n"
-  + "Maak per dag een array \"blokken\" met ALLE tijdstippen in chronologische volgorde inclusief het allerlaatste zichtbare tijdstip onderaan de kolom (dat laatste element dient alleen als eindmarkering, de status ervan maakt niet uit). Formaat per element: {\"tijd\":\"07:35\",\"status\":\"wit\"}.\n\n"
+  + "Maak per dag een array \"blokken\" in chronologische volgorde, inclusief het allerlaatste zichtbare tijdstip onderaan de kolom als eindmarkering (status van dat laatste element maakt niet uit). BELANGRIJK VOOR BEKNOPTHEID: voeg alleen een nieuw element toe op het moment dat de status VERANDERT ten opzichte van het vorige blok — meerdere opeenvolgende blokken met dezelfde status (bijv. drie \"Patientafspraak\"-blokken na elkaar) mag je samenvoegen tot één element op het tijdstip waar die reeks begint. Formaat per element: {\"tijd\":\"07:35\",\"status\":\"wit\"}.\n\n"
   + "Antwoord ALLEEN met een geldig JSON-object in dit formaat, zonder andere tekst of markdown-opmaak:\n"
   + "{\"dagen\":[{\"dag\":\"maandag\",\"blokken\":[{\"tijd\":\"07:00\",\"status\":\"grijs\"},{\"tijd\":\"07:35\",\"status\":\"wit\"},{\"tijd\":\"08:25\",\"status\":\"patient\"}]},{\"dag\":\"dinsdag\",\"blokken\":[]},{\"dag\":\"woensdag\",\"blokken\":[]},{\"dag\":\"donderdag\",\"blokken\":[]},{\"dag\":\"vrijdag\",\"blokken\":[]}],\"opmerking\":\"\"}\n\n"
   + "Het veld \"opmerking\" mag een korte (max 20 woorden) toelichting bevatten over onzekere interpretaties, anders een lege string.";
@@ -212,7 +212,7 @@ async function analyzeAgendaScreenshot(base64, mediaType) {
     },
     body: JSON.stringify({
       model: "claude-sonnet-4-5",
-      max_tokens: 2000,
+      max_tokens: 4000,
       messages: [{
         role: "user",
         content: [
@@ -231,7 +231,11 @@ async function analyzeAgendaScreenshot(base64, mediaType) {
   const clean = textOut.replace(/```json|```/g,"").trim();
   let parsed;
   try { parsed = JSON.parse(clean); }
-  catch(e) { throw new Error("Kon de agenda niet automatisch interpreteren — vul handmatig in"); }
+  catch(e) {
+    console.error("Kon AI-antwoord niet parsen. stop_reason:", data.stop_reason, "ruwe tekst:", textOut);
+    if (data.stop_reason === "max_tokens") throw new Error("Antwoord van de AI was afgebroken (te lang) — probeer het opnieuw of vul handmatig in");
+    throw new Error("Kon de agenda niet automatisch interpreteren — vul handmatig in");
+  }
   const dagenRaw = Array.isArray(parsed.dagen) ? parsed.dagen : [];
   const dagen = dagenRaw.map(d => ({ dag: d.dag, ...verwerkDag(d.blokken) }));
   const gewerktTotaal = dagen.reduce((s,d)=>s+d.uren,0);
