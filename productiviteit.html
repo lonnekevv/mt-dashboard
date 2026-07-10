@@ -162,11 +162,12 @@ const AGENDA_PROMPT = "Je krijgt een screenshot van de weekagenda van één fysi
   + "Status is precies één van deze 6 waarden:\n"
   + "- \"grijs\": het blok heeft een vlakke grijze achtergrondkleur, exact hexcode #B5B5B5 (of zeer dicht daarbij), zonder tekst. Dit betekent: collega is AFWEZIG. Grijze blokken zitten vrijwel altijd alleen aan het begin van de dag (vóór aankomst) en aan het eind van de dag (na vertrek) — bijna nooit verspreid in het midden.\n"
   + "- \"wit\": het blok heeft GEEN achtergrondkleur (kleurloos/wit, #FFFFFF of transparant) — dus duidelijk lichter dan het grijs van #B5B5B5 hierboven — met hooguit een dun randlijntje en eventueel een neutraal label zoals \"Zaal patient\". Dit betekent: collega is AANWEZIG maar heeft geen patiënt. Dit is de meest voorkomende status voor lege vakken IN het midden van de dag. Vergelijk bij twijfel de helderheid: #B5B5B5 is duidelijk grijzer/donkerder dan een wit/kleurloos vak.\n"
-  + "- \"patient\": een \"Patientafspraak\"-blok in groen, paars, bruin/kastanje of blauwgroen/turquoise, of \"Fyzio Training\"/\"performance training\" met een daadwerkelijke patiëntafspraak erbij.\n"
+  + "- \"patient\": een \"Patientafspraak\"-blok in groen, paars, bruin/kastanje, blauwgroen/turquoise, of blauw/lavendel (hexcode #A6B8FF — dit betekent een patiënt op een strippenkaart), of \"Fyzio Training\"/\"performance training\" met een daadwerkelijke patiëntafspraak erbij.\n"
   + "- \"overig\": een roze \"Patientafspraak\"-blok (contactmoment), een cyaan/lichtblauw blok (MT-uren, met of zonder tekst), of een andere praktijktaak met een eigen tijdvak (bijv. \"Schoonmaken kamer\").\n"
   + "- \"vergadering\": een donkerblauw blok, een blok met label \"Teamoverleg\"/\"MT\", of een blok dat ALLEEN een persoonsnaam bevat zonder \"Patientafspraak\".\n"
   + "- \"oranje\": een oranje blok met een rood uitroepteken, ongeacht de tekst erin.\n\n"
   + "Behandel \"Pauze\"-blokken als \"wit\" tenzij ze een duidelijk grijze vulling hebben (dan \"grijs\"). Sla tekstregels die beginnen met \"-\" en die ONDER een ander blok staan volledig over — dat zijn persoonlijke notities, geen blokken. Sla ook het label \"FysioFit uur\" zelf over als het geen eigen patiëntafspraak-blok bevat (behandel dat tijdstip dan als \"wit\").\n\n"
+  + "Context: bij Fyzio Totaal werkt op vrijwel elke dag één collega een avonddienst, met een startijd rond 13:00 en een eindtijd rond 20:50-21:00. Een werkdag die doorloopt tot in de late avond is dus normaal en geen reden om aan je kleurclassificatie te twijfelen — controleer gewoon per blok de kleur, ongeacht hoe laat het is.\n\n"
   + "Maak per dag een array \"blokken\" in chronologische volgorde, inclusief het allerlaatste zichtbare tijdstip onderaan de kolom als eindmarkering (status van dat laatste element maakt niet uit). BELANGRIJK VOOR BEKNOPTHEID: voeg alleen een nieuw element toe op het moment dat de status VERANDERT ten opzichte van het vorige blok — meerdere opeenvolgende blokken met dezelfde status (bijv. drie \"Patientafspraak\"-blokken na elkaar) mag je samenvoegen tot één element op het tijdstip waar die reeks begint. Formaat per element: {\"tijd\":\"07:35\",\"status\":\"wit\"}.\n\n"
   + "Antwoord ALLEEN met een geldig JSON-object in dit formaat, zonder andere tekst of markdown-opmaak:\n"
   + "{\"dagen\":[{\"dag\":\"maandag\",\"blokken\":[{\"tijd\":\"07:00\",\"status\":\"grijs\"},{\"tijd\":\"07:35\",\"status\":\"wit\"},{\"tijd\":\"08:25\",\"status\":\"patient\"}]},{\"dag\":\"dinsdag\",\"blokken\":[]},{\"dag\":\"woensdag\",\"blokken\":[]},{\"dag\":\"donderdag\",\"blokken\":[]},{\"dag\":\"vrijdag\",\"blokken\":[]}],\"opmerking\":\"\"}\n\n"
@@ -549,20 +550,26 @@ function CollegaTab() {
                       <th style={{textAlign:"right",padding:"3px 6px"}}>Uur gewerkt</th>
                     </tr></thead>
                     <tbody>
-                      {(r.ai.dagen||[]).map((d,i)=>(
-                        <tr key={i} style={{borderBottom:"0.5px solid "+BRAND.border}}>
-                          <td style={{padding:"3px 6px",textTransform:"capitalize"}}>{d.dag}</td>
+                      {(r.ai.dagen||[]).map((d,i)=>{
+                        const verdacht = d.uren > 11;
+                        return (
+                        <tr key={i} style={{borderBottom:"0.5px solid "+BRAND.border, background:verdacht?BRAND.warnBg:"transparent"}}>
+                          <td style={{padding:"3px 6px",textTransform:"capitalize"}}>{d.dag}{verdacht && <span title="Ongebruikelijk lange dag — controleer handmatig" style={{marginLeft:4}}>⚠️</span>}</td>
                           <td style={{textAlign:"center",padding:"3px 6px"}}>{d.start||"— (afwezig)"}</td>
                           <td style={{textAlign:"center",padding:"3px 6px"}}>{d.eind||"—"}</td>
-                          <td style={{textAlign:"right",padding:"3px 6px",fontWeight:600}}>{d.uren||0}u</td>
+                          <td style={{textAlign:"right",padding:"3px 6px",fontWeight:600,color:verdacht?BRAND.warn:BRAND.text}}>{d.uren||0}u</td>
                         </tr>
-                      ))}
+                        );
+                      })}
                       <tr style={{fontWeight:700}}>
                         <td colSpan="3" style={{padding:"5px 6px",textAlign:"right"}}>Totaal gewerkt:</td>
                         <td style={{textAlign:"right",padding:"5px 6px"}}>{r.g}u</td>
                       </tr>
                     </tbody>
                   </table>
+                  {(r.ai.dagen||[]).some(d=>d.uren>11) && (
+                    <div style={{fontSize:11,color:BRAND.warn,marginBottom:8}}>⚠️ Eén of meer dagen zijn ongebruikelijk lang (&gt;11u) — controleer deze handmatig, de AI kan grijs/wit hebben verward.</div>
+                  )}
                   <div style={{fontSize:12,color:BRAND.text,lineHeight:1.7}}>
                     <div style={{fontWeight:600,marginBottom:2}}>Waarvan binnen het werkvenster:</div>
                     <div>🩺 Patiëntcontact: <b>{r.ai.patient}u</b></div>
