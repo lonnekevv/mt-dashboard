@@ -97,6 +97,68 @@ const BRAND = {
 };
 const META_ID = "_collegas";
 const DEFAULT_COLLEGAS = ["Lars","Lonneke","Jan Willem","Mayke","Laura","Nikita","Julia","Jesper","Thomas","Lynn"];
+const DAG_NAMEN = ["maandag","dinsdag","woensdag","donderdag","vrijdag"];
+
+// Basisrooster per collega: [maandag, dinsdag, woensdag, donderdag, vrijdag], null = vrij
+const ROOSTER = {
+  "Lars":        [["7:35","17:25"],["7:35","17:25"],null,["13:00","21:00"],["7:35","17:00"]],
+  "Lonneke":     [["7:35","16:35"],["7:35","17:25"],["13:00","21:00"],null,["7:35","17:00"]],
+  "Jan Willem":  [["7:35","16:35"],["6:30","16:35"],["13:00","21:00"],["13:00","17:50"],["7:35","15:05"]],
+  "Mayke":       [["13:00","21:00"],["7:35","17:25"],["7:35","17:00"],null,["7:35","17:00"]],
+  "Laura":       [["7:35","17:25"],["13:00","21:00"],null,["7:35","17:25"],["7:35","17:00"]],
+  "Nikita":      [["7:35","17:25"],["13:00","21:00"],null,["7:35","17:25"],null],
+  "Julia":       [["13:00","21:00"],null,["8:00","17:25"],["8:00","17:25"],["13:00","17:00"]],
+  "Jesper":      [["13:00","21:00"],["8:50","17:50"],["8:00","12:45"],["7:35","16:35"],["7:35","17:00"]],
+  "Thomas":      [null,["7:35","17:25"],["7:35","17:00"],["13:00","21:00"],["7:35","17:00"]],
+  "Lynn":        [["13:00","21:00"],null,["7:30","17:00"],null,["8:00","17:00"]],
+};
+
+// Kleurenlegenda: exacte hexcodes → betekenis en categorie.
+// categorie: "patient" (patiëntcontact), "overig_productief" (productief maar geen patiëntcontact,
+// bijv. MT-uren/vergadering), "niet_productief" (aanwezig, telt niet mee), "notitie" (handmatig te bevestigen)
+// conditioneel: true = telt alleen mee als er ook echt "Patientafspraak"-tekst bij staat
+const COLOR_LEGEND = [
+  {hex:"#BDD3FF",label:"manuele therapie",cat:"patient"},
+  {hex:"#DEFFB8",label:"intake + echo",cat:"patient"},
+  {hex:"#FFFFFF",label:"reguliere zitting",cat:"patient",conditioneel:true},
+  {hex:"#BF60B3",label:"ZorgTopics behandeling",cat:"patient"},
+  {hex:"#AB7DBF",label:"FyzioFit uur",cat:"niet_productief"},
+  {hex:"#A15947",label:"FyzioFit patiënt",cat:"patient"},
+  {hex:"#5EFF9F",label:"intake",cat:"patient"},
+  {hex:"#DD97E8",label:"Exclufit",cat:"patient"},
+  {hex:"#B879AB",label:"Exclufit",cat:"patient"},
+  {hex:"#9F21FF",label:"Exclufit / supportgroep zorgplan / 1-1 training",cat:"patient"},
+  {hex:"#BCBF9D",label:"orofaciaal",cat:"patient"},
+  {hex:"#C5E6B3",label:"orofaciaal intake",cat:"patient"},
+  {hex:"#C1EBFA",label:"zaal patiënt",cat:"patient",conditioneel:true},
+  {hex:"#FFC526",label:"sportspreekuur",cat:"patient"},
+  {hex:"#FF7A7A",label:"sportspreekuur",cat:"niet_productief"},
+  {hex:"#A6B8FF",label:"strippenkaart",cat:"patient"},
+  {hex:"#F88FFF",label:"contactmoment",cat:"niet_productief"},
+  {hex:"#FFF5FE",label:"lange zitting",cat:"patient"},
+  {hex:"#E3A1FF",label:"supportgroep abbo",cat:"patient"},
+  {hex:"#1FE1FF",label:"performance training",cat:"patient",conditioneel:true},
+  {hex:"#448080",label:"huisbezoek",cat:"patient"},
+  {hex:"#FAFFB8",label:"echo",cat:"patient"},
+  {hex:"#C4ABFF",label:"testen VKB",cat:"patient"},
+  {hex:"#FFEBFB",label:"groepszitting",cat:"patient"},
+  {hex:"#FFC7B3",label:"shockwave",cat:"patient"},
+  {hex:"#0AFFFF",label:"MT-uren",cat:"overig_productief"},
+  {hex:"#4589FF",label:"vergadertijd",cat:"overig_productief"},
+  {hex:"#00BA1F",label:"zaaltraining",cat:"patient",conditioneel:true},
+  {hex:"#298DFF",label:"veldtraining",cat:"niet_productief"},
+  {hex:"#19C2FF",label:"veldtraining",cat:"patient"},
+  {hex:"#CE49E3",label:"performance analyse",cat:"patient"},
+  {hex:"#5C33FF",label:"performance test",cat:"patient"},
+  {hex:"#824DFF",label:"performance training (dinsdag)",cat:"patient",conditioneel:true},
+  {hex:"#FF1259",label:"afgemelde afspraak (tijdig of coulance)",cat:"niet_productief"},
+  {hex:"#719BAD",label:"agraves verwijderen",cat:"patient"},
+  {hex:"#FCFC47",label:"pauze",cat:"afwezig"},
+  {hex:"#DE2A48",label:"vakantie",cat:"afwezig"},
+  {hex:"#DEDEDE",label:"aansluitend/in overleg",cat:"niet_productief"},
+  {hex:"#B5B5B5",label:"afwezig",cat:"afwezig"},
+  {hex:"#FFA142",label:"notitie",cat:"notitie"},
+];
 
 // ── HELPERS ────────────────────────────────────────────────────────────
 function getMondayStr(d) { const day=d.getDay(),diff=d.getDate()-day+(day===0?-6:1); const m=new Date(d); m.setDate(diff); return m.toISOString().slice(0,10); }
@@ -109,7 +171,22 @@ function pctColor(p) {
   if (p>=55) return BRAND.warn;
   return BRAND.danger;
 }
-function emptyRow() { return { gewerkt:"", patient:"", _ai:null }; }
+function tijdNaarUren(t) { if(!t) return 0; const [h,m]=String(t).split(":").map(Number); return (h||0)+(m||0)/60; }
+function roosterVoorCollega(c) { return ROOSTER[c] || [null,null,null,null,null]; }
+function dagenDefault(c) {
+  return roosterVoorCollega(c).map((d,i)=>({
+    dag: DAG_NAMEN[i],
+    start: d ? d[0] : "",
+    eind: d ? d[1] : "",
+    vrij: !d,
+  }));
+}
+function berekenGewerktUitDagen(dagen) {
+  if (!Array.isArray(dagen)) return 0;
+  const totaal = dagen.reduce((s,d)=> s + (d.vrij ? 0 : Math.max(0, tijdNaarUren(d.eind)-tijdNaarUren(d.start))), 0);
+  return Math.round(totaal*4)/4;
+}
+function emptyRow() { return { dagen:null, patient:"", _ai:null }; }
 function emptyForm(collegas) { const f={}; collegas.forEach(c=>{f[c]=emptyRow();}); return f; }
 
 // ── AI: agenda-screenshot → uren per categorie ────────────────────────
@@ -157,52 +234,31 @@ async function zorgVoorApiKey() {
   return key;
 }
 
-const AGENDA_PROMPT = "Je krijgt een screenshot van de weekagenda van één fysio-collega bij Fyzio Totaal. De agenda heeft vijf kolommen (maandag t/m vrijdag); de datum staat bovenaan de kolom, de dagnaam staat er direct onder. Elke rij heeft links een tijdstip en rechts een blok dat duurt tot het volgende tijdstip.\n\n"
-  + "Jouw taak is NIET om zelf uren te berekenen — dat doet code achteraf. Jouw taak is puur: loop per dag van boven naar beneden en noteer voor ELK tijdstip waarop een nieuw blok begint, de tijd en de status van dat blok. Dit is een simpele classificatie per regel, geen rekenwerk.\n\n"
-  + "Status is precies één van deze 6 waarden:\n"
-  + "- \"grijs\": het blok heeft een vlakke grijze achtergrondkleur, exact hexcode #B5B5B5 (of zeer dicht daarbij), zonder tekst. Dit betekent: collega is AFWEZIG. Grijze blokken zitten vrijwel altijd alleen aan het begin van de dag (vóór aankomst) en aan het eind van de dag (na vertrek) — bijna nooit verspreid in het midden.\n"
-  + "- \"wit\": het blok heeft GEEN achtergrondkleur (kleurloos/wit, #FFFFFF of transparant) — dus duidelijk lichter dan het grijs van #B5B5B5 hierboven — met hooguit een dun randlijntje en eventueel een neutraal label zoals \"Zaal patient\". Dit betekent: collega is AANWEZIG maar heeft geen patiënt. Dit is de meest voorkomende status voor lege vakken IN het midden van de dag. Vergelijk bij twijfel de helderheid: #B5B5B5 is duidelijk grijzer/donkerder dan een wit/kleurloos vak.\n"
-  + "- \"patient\": een \"Patientafspraak\"-blok in groen, paars, bruin/kastanje, blauwgroen/turquoise, of blauw/lavendel (hexcode #A6B8FF — dit betekent een patiënt op een strippenkaart), of \"Fyzio Training\"/\"performance training\" met een daadwerkelijke patiëntafspraak erbij.\n"
-  + "- \"overig\": een roze \"Patientafspraak\"-blok (contactmoment), een cyaan/lichtblauw blok (MT-uren, met of zonder tekst), of een andere praktijktaak met een eigen tijdvak (bijv. \"Schoonmaken kamer\").\n"
-  + "- \"vergadering\": een donkerblauw blok, een blok met label \"Teamoverleg\"/\"MT\", of een blok dat ALLEEN een persoonsnaam bevat zonder \"Patientafspraak\".\n"
-  + "- \"oranje\": een oranje blok met een rood uitroepteken, ongeacht de tekst erin.\n\n"
-  + "Behandel \"Pauze\"-blokken als \"wit\" tenzij ze een duidelijk grijze vulling hebben (dan \"grijs\"). Sla tekstregels die beginnen met \"-\" en die ONDER een ander blok staan volledig over — dat zijn persoonlijke notities, geen blokken. Sla ook het label \"FysioFit uur\" zelf over als het geen eigen patiëntafspraak-blok bevat (behandel dat tijdstip dan als \"wit\").\n\n"
-  + "Context: bij Fyzio Totaal werkt op vrijwel elke dag één collega een avonddienst, met een startijd rond 13:00 en een eindtijd rond 20:50-21:00. Een werkdag die doorloopt tot in de late avond is dus normaal en geen reden om aan je kleurclassificatie te twijfelen — controleer gewoon per blok de kleur, ongeacht hoe laat het is.\n\n"
-  + "Maak per dag een array \"blokken\" in chronologische volgorde, inclusief het allerlaatste zichtbare tijdstip onderaan de kolom als eindmarkering (status van dat laatste element maakt niet uit). BELANGRIJK VOOR BEKNOPTHEID: voeg alleen een nieuw element toe op het moment dat de status VERANDERT ten opzichte van het vorige blok — meerdere opeenvolgende blokken met dezelfde status (bijv. drie \"Patientafspraak\"-blokken na elkaar) mag je samenvoegen tot één element op het tijdstip waar die reeks begint. Formaat per element: {\"tijd\":\"07:35\",\"status\":\"wit\"}.\n\n"
-  + "Antwoord ALLEEN met een geldig JSON-object in dit formaat, zonder andere tekst of markdown-opmaak:\n"
-  + "{\"dagen\":[{\"dag\":\"maandag\",\"blokken\":[{\"tijd\":\"07:00\",\"status\":\"grijs\"},{\"tijd\":\"07:35\",\"status\":\"wit\"},{\"tijd\":\"08:25\",\"status\":\"patient\"}]},{\"dag\":\"dinsdag\",\"blokken\":[]},{\"dag\":\"woensdag\",\"blokken\":[]},{\"dag\":\"donderdag\",\"blokken\":[]},{\"dag\":\"vrijdag\",\"blokken\":[]}],\"opmerking\":\"\"}\n\n"
-  + "Het veld \"opmerking\" mag een korte (max 20 woorden) toelichting bevatten over onzekere interpretaties, anders een lege string.";
+const AGENDA_PROMPT_INTRO = "Je krijgt een screenshot van de weekagenda van één fysio-collega bij Fyzio Totaal. De agenda heeft vijf kolommen (maandag t/m vrijdag); de datum staat bovenaan de kolom, de dagnaam staat er direct onder. Elke rij heeft links een tijdstip en rechts een blok dat duurt tot het volgende tijdstip.\n\n"
+  + "De begin- en eindtijd van de werkdag hoef je NIET te bepalen (dat komt uit een vast rooster). Jouw enige taak is: classificeer elk blok in de agenda op basis van zijn achtergrondkleur, aan de hand van de EXACTE kleurenlijst hieronder. Vergelijk de kleur van elk blok met deze lijst en kies de dichtstbijzijnde match.\n\n"
+  + "KLEURENLIJST (hexcode → betekenis → categorie):\n";
 
-function parseTijd(t) { const parts=String(t).split(":"); return (parseInt(parts[0],10)||0)*60+(parseInt(parts[1],10)||0); }
-
-function verwerkDag(blokken) {
-  if (!Array.isArray(blokken) || blokken.length===0) return {start:null,eind:null,uren:0,patient:0,overig:0,vergadering:0,oranje:0};
-  const startIdx = blokken.findIndex(b=>b.status!=="grijs");
-  if (startIdx===-1) return {start:null,eind:null,uren:0,patient:0,overig:0,vergadering:0,oranje:0};
-  let endIdx=-1;
-  for (let i=startIdx+1;i<blokken.length;i++){ if (blokken[i].status==="grijs"){ endIdx=i; break; } }
-  if (endIdx===-1) endIdx = blokken.length-1;
-  const startMin = parseTijd(blokken[startIdx].tijd);
-  const eindMin = parseTijd(blokken[endIdx].tijd);
-  const uren = Math.max(0, Math.round(((eindMin-startMin)/60)*4)/4);
-  let patient=0, overig=0, vergadering=0, oranje=0;
-  for (let i=startIdx;i<endIdx;i++){
-    const dur = Math.max(0,(parseTijd(blokken[i+1].tijd)-parseTijd(blokken[i].tijd))/60);
-    const st = blokken[i].status;
-    if (st==="patient") patient+=dur;
-    else if (st==="overig") overig+=dur;
-    else if (st==="vergadering") vergadering+=dur;
-    else if (st==="oranje") oranje+=dur;
-  }
-  return {
-    start: blokken[startIdx].tijd, eind: blokken[endIdx].tijd, uren,
-    patient: Math.round(patient*4)/4, overig: Math.round(overig*4)/4,
-    vergadering: Math.round(vergadering*4)/4, oranje: Math.round(oranje*4)/4
-  };
+function bouwLegendaTekst() {
+  return COLOR_LEGEND.map(function(c){
+    var extra = c.conditioneel ? " [LET OP: telt alleen mee als er ook echt \"Patientafspraak\"-tekst bij dit blok staat; is het leeg/blanco zonder patiënt, dan telt het NERGENS in mee]" : "";
+    return c.hex + " = \"" + c.label + "\" → categorie: " + c.cat + extra;
+  }).join("\n");
 }
+
+const AGENDA_PROMPT_OUTRO = "\n\nCategorieën uitgelegd:\n"
+  + "- \"patient\": patiëntcontact.\n"
+  + "- \"overig_productief\": geen patiëntcontact, maar wel productieve werktijd voor de praktijk (MT-uren, vergadertijd).\n"
+  + "- \"niet_productief\": aanwezig, maar telt niet mee als productief (bijv. FyzioFit uur-label zelf, contactmoment, afgemelde afspraken).\n"
+  + "- \"afwezig\": pauze/vakantie/afwezigheid — negeer volledig, telt nergens in mee.\n"
+  + "- \"notitie\": kleur #FFA142, onduidelijk of dit productief is — tel dit apart op, het wordt straks handmatig bevestigd.\n\n"
+  + "Sla tekstregels die beginnen met \"-\" en die ONDER een ander blok staan volledig over — dat zijn persoonlijke notities, geen blokken.\n\n"
+  + "Tel per dag het totaal aantal uren per categorie op (op basis van start- en eindtijd van elk blok, afgerond op kwartieren). Antwoord ALLEEN met een geldig JSON-object in dit formaat, zonder andere tekst of markdown-opmaak:\n"
+  + "{\"dagen\":[{\"dag\":\"maandag\",\"patient_uren\":0,\"overig_productief_uren\":0,\"niet_productief_uren\":0,\"notitie_uren\":0},{\"dag\":\"dinsdag\",\"patient_uren\":0,\"overig_productief_uren\":0,\"niet_productief_uren\":0,\"notitie_uren\":0},{\"dag\":\"woensdag\",\"patient_uren\":0,\"overig_productief_uren\":0,\"niet_productief_uren\":0,\"notitie_uren\":0},{\"dag\":\"donderdag\",\"patient_uren\":0,\"overig_productief_uren\":0,\"niet_productief_uren\":0,\"notitie_uren\":0},{\"dag\":\"vrijdag\",\"patient_uren\":0,\"overig_productief_uren\":0,\"niet_productief_uren\":0,\"notitie_uren\":0}],\"opmerking\":\"\"}\n\n"
+  + "Het veld \"opmerking\" mag een korte (max 20 woorden) toelichting bevatten over onzekere interpretaties, anders een lege string.";
 
 async function analyzeAgendaScreenshot(base64, mediaType) {
   const apiKey = await zorgVoorApiKey();
+  const promptText = AGENDA_PROMPT_INTRO + bouwLegendaTekst() + AGENDA_PROMPT_OUTRO;
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -213,12 +269,12 @@ async function analyzeAgendaScreenshot(base64, mediaType) {
     },
     body: JSON.stringify({
       model: "claude-sonnet-4-5",
-      max_tokens: 4000,
+      max_tokens: 2000,
       messages: [{
         role: "user",
         content: [
           { type: "image", source: { type:"base64", media_type: mediaType || "image/png", data: base64 } },
-          { type: "text", text: AGENDA_PROMPT }
+          { type: "text", text: promptText }
         ]
       }]
     })
@@ -238,19 +294,29 @@ async function analyzeAgendaScreenshot(base64, mediaType) {
     throw new Error("Kon de agenda niet automatisch interpreteren — vul handmatig in");
   }
   const dagenRaw = Array.isArray(parsed.dagen) ? parsed.dagen : [];
-  const dagen = dagenRaw.map(d => ({ dag: d.dag, ...verwerkDag(d.blokken) }));
-  const gewerktTotaal = dagen.reduce((s,d)=>s+d.uren,0);
+  const dagen = dagenRaw.map(function(d){
+    return {
+      dag: d.dag,
+      patient: Math.round((Number(d.patient_uren)||0)*4)/4,
+      overigProductief: Math.round((Number(d.overig_productief_uren)||0)*4)/4,
+      nietProductief: Math.round((Number(d.niet_productief_uren)||0)*4)/4,
+      notitie: Math.round((Number(d.notitie_uren)||0)*4)/4,
+    };
+  });
   const patientU = dagen.reduce((s,d)=>s+d.patient,0);
-  const overigU = dagen.reduce((s,d)=>s+d.overig,0);
-  const vergaderingU = dagen.reduce((s,d)=>s+d.vergadering,0);
-  const npU = dagen.reduce((s,d)=>s+d.oranje,0);
+  const overigProductiefU = dagen.reduce((s,d)=>s+d.overigProductief,0);
+  const nietProductiefU = dagen.reduce((s,d)=>s+d.nietProductief,0);
+  const notitieU = dagen.reduce((s,d)=>s+d.notitie,0);
   return {
-
     patient: Math.round(patientU*4)/4,
-    gewerkt: Math.round(gewerktTotaal*4)/4,
-    np: Math.round(npU*4)/4,
     opmerking: parsed.opmerking || "",
-    breakdown: { dagen, patient: patientU, overig: overigU, vergadering: vergaderingU, np: npU }
+    breakdown: {
+      dagen,
+      patient: Math.round(patientU*4)/4,
+      overigProductief: Math.round(overigProductiefU*4)/4,
+      nietProductief: Math.round(nietProductiefU*4)/4,
+      notitiePending: Math.round(notitieU*4)/4,
+    }
   };
 }
 
@@ -289,7 +355,8 @@ function InvoerTab({formData,setFormData}) {
   const [saveErr,setSaveErr] = useState("");
   const [newCollega,setNewCollega] = useState("");
   const [aiState,setAiState] = useState({}); // {[collega]: {status:'idle'|'loading'|'error', msg}} — puur voor de actie zelf, niet persistent
-  const [npInput,setNpInput] = useState({}); // {[collega]: "1.5"} handmatige correctie voor 'np'-blokken
+  const [npInput,setNpInput] = useState({}); // {[collega]: "1.5"} handmatige correctie voor 'notitie'-blokken
+  const [editingDays,setEditingDays] = useState({}); // {[collega]: true} toont dag-editor voor uitzonderingen
 
   useEffect(()=>{
     const wk = weeks[currentMonday];
@@ -306,6 +373,23 @@ function InvoerTab({formData,setFormData}) {
     setSaved(false);
   },[]);
 
+  function getDagen(c,row) { return (row && row.dagen) ? row.dagen : dagenDefault(c); }
+
+  function setDag(c, idx, field, value) {
+    setFormData(p=>{
+      const row = p[c];
+      const dagen = getDagen(c,row).map(d=>({...d}));
+      dagen[idx] = {...dagen[idx], [field]: value};
+      return {...p, [c]: {...row, dagen}};
+    });
+    setSaved(false);
+  }
+
+  function resetRooster(c) {
+    setFormData(p=>({...p, [c]: {...p[c], dagen:null}}));
+    setSaved(false);
+  }
+
   async function persist(dataToSave) {
     setSaving(true); setSaveErr("");
     try { await saveRow(currentMonday, dataToSave); await reload(); setSaved(true); }
@@ -321,25 +405,26 @@ function InvoerTab({formData,setFormData}) {
       const base64 = await fileToBase64(file);
       const result = await analyzeAgendaScreenshot(base64, file.type);
       const updated = {...formData, [c]:{
-        gewerkt:String(result.gewerkt),
+        ...formData[c],
         patient:String(result.patient),
-        _ai:{ ...result.breakdown, npPending:result.np||0, opmerking:result.opmerking||"" }
+        _ai:{ ...result.breakdown, opmerking:result.opmerking||"" }
       }};
       setFormData(updated);
       setAiState(p=>({...p,[c]:{status:"ok",msg:""}}));
+      setNpInput(p=>({...p,[c]:""}));
       await persist(updated);
     } catch(e) {
       setAiState(p=>({...p,[c]:{status:"error",msg:e.message}}));
     }
   }
 
-  async function confirmNp(c) {
+  async function confirmNotitie(c) {
     const extra = num(npInput[c]);
     const row = formData[c];
+    if (!row._ai) return;
     const updated = {...formData, [c]:{
       ...row,
-      gewerkt:String(Math.round((num(row.gewerkt)+extra)*4)/4),
-      _ai: row._ai ? {...row._ai, npPending:0} : null
+      _ai: {...row._ai, overigProductief: Math.round((row._ai.overigProductief+extra)*4)/4, notitiePending:0}
     }};
     setFormData(updated);
     await persist(updated);
@@ -352,7 +437,6 @@ function InvoerTab({formData,setFormData}) {
     setNpInput(p=>({...p,[c]:""}));
     await persist(updated);
   }
-
 
   function handleAddCollega() {
     const naam = newCollega.trim();
@@ -372,8 +456,8 @@ function InvoerTab({formData,setFormData}) {
       </div>
 
       <div style={{display:"flex",gap:8,alignItems:"flex-start",background:BRAND.bluePale,border:"1px solid "+BRAND.blueBorder,borderRadius:8,padding:"10px 14px",marginBottom:"0.9rem",fontSize:12,color:BRAND.blueDark}}>
-        <span>📷</span>
-        <span>Upload per collega een screenshot van de weekagenda — de AI herkent patiëntcontact, overig werk en vergaderingen op basis van Fyzio Totaal's eigen kleurcodes, en vult "Uren gewerkt" en "Uren patiëntcontact" automatisch en direct opgeslagen in. Bij oranje blokken met een uitroepteken (ongeacht de tekst erin) vraagt de tool je zelf aan te geven hoeveel daarvan echt telde als gewerkte tijd. Klopt iets niet? Pas het gewoon handmatig aan.</span>
+        <span>📅</span>
+        <span>"Uren gewerkt" komt automatisch uit ieders basisrooster. Klik op "dagen aanpassen" bij een collega om uitzonderingen door te geven (vrij, later begonnen, eerder gestopt). Upload eventueel ook een agenda-screenshot per collega — de AI vult dan "Uren patiëntcontact" in op basis van Fyzio Totaal's exacte kleurenlijst.</span>
       </div>
 
       <div className="tbl-wrap" style={{marginBottom:"1rem"}}>
@@ -386,10 +470,14 @@ function InvoerTab({formData,setFormData}) {
           <tbody>
             {collegas.map(c=>{
               const row = formData[c] || emptyRow();
-              const p = pct(num(row.gewerkt), num(row.patient));
+              const dagen = getDagen(c,row);
+              const gewerkt = berekenGewerktUitDagen(dagen);
+              const p = pct(gewerkt, num(row.patient));
               const st = aiState[c] || {status:"idle",msg:""};
+              const isAangepast = !!row.dagen;
               return (
-                <tr key={c} style={{borderBottom:"0.5px solid "+BRAND.border}}>
+                <React.Fragment key={c}>
+                <tr style={{borderBottom:"0.5px solid "+BRAND.border}}>
                   <td style={{padding:"8px 10px",fontWeight:500,color:BRAND.text}}>{c}</td>
                   <td style={{textAlign:"center",padding:"6px 8px"}}>
                     <input type="file" accept="image/*" id={"ss-"+c} style={{display:"none"}}
@@ -402,8 +490,8 @@ function InvoerTab({formData,setFormData}) {
                     {row._ai && st.status!=="loading" && <div style={{fontSize:10,color:BRAND.blueDark,marginTop:3}}>🤖 AI-ingevuld</div>}
                     {st.status==="error" && <div style={{fontSize:10,color:BRAND.danger,marginTop:3,maxWidth:120}}>⚠ {st.msg}</div>}
                     {row._ai && row._ai.opmerking && <div style={{fontSize:10,color:BRAND.textMuted,marginTop:3,maxWidth:120}}>ℹ {row._ai.opmerking}</div>}
-                    {(row.gewerkt!=="" || row.patient!=="") && (
-                      <button onClick={()=>removeUpload(c)} title="Wis de uren van deze collega voor deze week"
+                    {(gewerkt>0 || row.patient!=="" || isAangepast) && (
+                      <button onClick={()=>removeUpload(c)} title="Wis alle gegevens van deze collega voor deze week"
                         style={{background:"none",border:"none",color:BRAND.danger,fontSize:10,textDecoration:"underline",cursor:"pointer",padding:0,marginTop:3,fontFamily:"'Poppins',sans-serif"}}>
                         ✕ wis deze week
                       </button>
@@ -411,21 +499,25 @@ function InvoerTab({formData,setFormData}) {
                     {row._ai && (
                       <div style={{fontSize:10,color:BRAND.textMuted,marginTop:3}}>Uitsplitsing: zie tab "Per collega"</div>
                     )}
-                    {row._ai && row._ai.npPending>0 && (
+                    {row._ai && row._ai.notitiePending>0 && (
                       <div style={{fontSize:10,color:BRAND.warn,marginTop:5,background:BRAND.warnBg,border:"1px solid "+BRAND.warn,borderRadius:6,padding:"5px 6px",maxWidth:140,textAlign:"left"}}>
-                        🟠 {row._ai.npPending}u in oranje blokken (❗). Hoeveel telt mee als gewerkt?
+                        🟠 {row._ai.notitiePending}u in "notitie"-blokken. Hoeveel telt mee als productief (niet-patiëntcontact)?
                         <div style={{display:"flex",gap:4,marginTop:4}}>
-                          <input type="number" min="0" max={row._ai.npPending} step="0.25" value={npInput[c]||""} placeholder="0"
+                          <input type="number" min="0" max={row._ai.notitiePending} step="0.25" value={npInput[c]||""} placeholder="0"
                             onChange={e=>setNpInput(p=>({...p,[c]:e.target.value}))}
                             style={{width:44,minHeight:26,padding:"2px 4px",fontSize:11,textAlign:"center"}}/>
-                          <button onClick={()=>confirmNp(c)} style={{background:BRAND.warn,color:"#fff",border:"none",borderRadius:5,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"'Poppins',sans-serif"}}>OK</button>
+                          <button onClick={()=>confirmNotitie(c)} style={{background:BRAND.warn,color:"#fff",border:"none",borderRadius:5,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"'Poppins',sans-serif"}}>OK</button>
                         </div>
                       </div>
                     )}
                   </td>
                   <td style={{textAlign:"center",padding:"6px 8px"}}>
-                    <input type="number" min="0" step="0.5" value={row.gewerkt} style={{width:70,textAlign:"center"}}
-                      onChange={e=>onVal(c,"gewerkt",e.target.value)}/>
+                    <div style={{fontWeight:600,color:BRAND.text}}>{gewerkt}u</div>
+                    <button onClick={()=>setEditingDays(p=>({...p,[c]:!p[c]}))}
+                      style={{background:"none",border:"none",color:BRAND.blueDark,fontSize:10,textDecoration:"underline",cursor:"pointer",padding:0,fontFamily:"'Poppins',sans-serif"}}>
+                      {editingDays[c] ? "verberg dagen" : "dagen aanpassen"}
+                    </button>
+                    {isAangepast && <div style={{fontSize:9,color:BRAND.warn,marginTop:2}}>afwijkend van rooster</div>}
                   </td>
                   <td style={{textAlign:"center",padding:"6px 8px"}}>
                     <input type="number" min="0" step="0.5" value={row.patient} style={{width:70,textAlign:"center"}}
@@ -433,6 +525,31 @@ function InvoerTab({formData,setFormData}) {
                   </td>
                   <td style={{textAlign:"center",padding:"6px 8px",fontWeight:600,color:pctColor(p)}}>{p==null?"—":p+"%"}</td>
                 </tr>
+                {editingDays[c] && (
+                  <tr>
+                    <td colSpan="5" style={{padding:"8px 10px",background:BRAND.purplePale}}>
+                      <div style={{display:"flex",flexWrap:"wrap",gap:10,alignItems:"flex-end"}}>
+                        {dagen.map((d,i)=>(
+                          <div key={i} style={{display:"flex",flexDirection:"column",gap:3}}>
+                            <label style={{fontSize:10,fontWeight:600,color:BRAND.textMuted,textTransform:"capitalize"}}>{d.dag}</label>
+                            <label style={{display:"flex",alignItems:"center",gap:3,fontSize:10,color:BRAND.text}}>
+                              <input type="checkbox" checked={!!d.vrij} onChange={e=>setDag(c,i,"vrij",e.target.checked)}/> vrij
+                            </label>
+                            {!d.vrij && (
+                              <div style={{display:"flex",gap:3}}>
+                                <input type="text" placeholder="7:35" value={d.start} onChange={e=>setDag(c,i,"start",e.target.value)} style={{width:52,fontSize:11,padding:"3px 4px"}}/>
+                                <span style={{fontSize:11,color:BRAND.textMuted}}>–</span>
+                                <input type="text" placeholder="17:00" value={d.eind} onChange={e=>setDag(c,i,"eind",e.target.value)} style={{width:52,fontSize:11,padding:"3px 4px"}}/>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                        <button onClick={()=>resetRooster(c)} style={{background:"none",border:"1px solid "+BRAND.purpleBorder,borderRadius:6,padding:"5px 10px",fontSize:11,cursor:"pointer",color:BRAND.purpleMid,fontFamily:"'Poppins',sans-serif",height:28}}>↺ reset naar rooster</button>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                </React.Fragment>
               );
             })}
           </tbody>
@@ -456,12 +573,13 @@ function InvoerTab({formData,setFormData}) {
       <div className="card-grid">
         {collegas.map(c=>{
           const row = formData[c] || emptyRow();
-          const p = pct(num(row.gewerkt), num(row.patient));
+          const gewerkt = berekenGewerktUitDagen(getDagen(c,row));
+          const p = pct(gewerkt, num(row.patient));
           return (
             <div key={c} style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderRadius:10,padding:"12px 14px",borderLeft:"3px solid "+pctColor(p)}}>
               <div style={{fontSize:13,fontWeight:500,color:BRAND.text,marginBottom:4}}>{c}</div>
               <div style={{fontSize:22,fontWeight:600,color:pctColor(p)}}>{p==null?"—":p+"%"}</div>
-              <div style={{fontSize:11,color:BRAND.textMuted}}>{num(row.patient)}u pat. / {num(row.gewerkt)}u werk</div>
+              <div style={{fontSize:11,color:BRAND.textMuted}}>{num(row.patient)}u pat. / {gewerkt}u werk</div>
             </div>
           );
         })}
@@ -480,12 +598,15 @@ function CollegaTab() {
 
   const rows = useMemo(()=>{
     return Object.keys(weeks).sort().reverse()
-      .filter(wk => weeks[wk] && weeks[wk][sel] && (weeks[wk][sel].gewerkt!=="" || weeks[wk][sel].patient!==""))
+      .filter(wk => weeks[wk] && weeks[wk][sel])
       .map(wk => {
         const r = weeks[wk][sel];
-        const g = num(r.gewerkt), pt = num(r.patient);
-        return { wk, g, pt, p: pct(g,pt), ai: r._ai || null };
-      });
+        const dagen = r.dagen || dagenDefault(sel);
+        const g = berekenGewerktUitDagen(dagen);
+        const pt = num(r.patient);
+        if (g===0 && pt===0 && !r._ai) return null;
+        return { wk, g, pt, p: pct(g,pt), dagen, ai: r._ai || null };
+      }).filter(Boolean);
   },[weeks,sel]);
 
   const avg = useMemo(()=>{
@@ -526,57 +647,54 @@ function CollegaTab() {
         ? <div style={{fontSize:13,color:BRAND.textMuted,padding:"1rem"}}>Nog geen gegevens ingevoerd voor {sel}.</div>
         : rows.map(r=>(
             <div key={r.wk} style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderRadius:10,padding:"12px 14px",marginBottom:10}}>
-              <ProdBar label={formatWeekLabel(r.wk)} p={r.p} sub={r.pt+"u patiëntcontact van "+r.g+"u gewerkt"} />
+              <ProdBar label={formatWeekLabel(r.wk)} p={r.p} sub={r.pt+"u patiëntcontact van "+r.g+"u gewerkt (volgens rooster)"} />
               <div style={{display:"flex",gap:14,marginTop:2}}>
-                {r.ai && (
-                  <button onClick={()=>setExpanded(p=>({...p,[r.wk]:!p[r.wk]}))}
-                    style={{background:"none",border:"none",color:BRAND.blueDark,fontSize:11,textDecoration:"underline",cursor:"pointer",padding:0,fontFamily:"'Poppins',sans-serif"}}>
-                    {expanded[r.wk] ? "Verberg uitsplitsing" : "Toon uitsplitsing"}
-                  </button>
-                )}
+                <button onClick={()=>setExpanded(p=>({...p,[r.wk]:!p[r.wk]}))}
+                  style={{background:"none",border:"none",color:BRAND.blueDark,fontSize:11,textDecoration:"underline",cursor:"pointer",padding:0,fontFamily:"'Poppins',sans-serif"}}>
+                  {expanded[r.wk] ? "Verberg uitsplitsing" : "Toon uitsplitsing"}
+                </button>
                 <button onClick={()=>deleteWeekEntry(r.wk)} disabled={deleting[r.wk]}
                   style={{background:"none",border:"none",color:BRAND.danger,fontSize:11,textDecoration:"underline",cursor:deleting[r.wk]?"not-allowed":"pointer",padding:0,fontFamily:"'Poppins',sans-serif"}}>
                   {deleting[r.wk] ? "Bezig met wissen…" : "✕ wis deze week"}
                 </button>
               </div>
-              {r.ai && expanded[r.wk] && (
+              {expanded[r.wk] && (
                 <div style={{marginTop:10,background:BRAND.purplePale,border:"1px solid "+BRAND.border,borderRadius:8,padding:"10px 12px"}}>
-                  {r.ai.opmerking && <div style={{fontSize:12,color:BRAND.textMuted,marginBottom:8}}>ℹ {r.ai.opmerking}</div>}
-                  <table style={{fontSize:12,borderCollapse:"collapse",width:"100%",marginBottom:8}}>
+                  <div style={{fontWeight:600,fontSize:12,marginBottom:6,color:BRAND.text}}>Rooster deze week (bron van "gewerkt")</div>
+                  <table style={{fontSize:12,borderCollapse:"collapse",width:"100%",marginBottom:10}}>
                     <thead><tr style={{color:BRAND.textMuted,borderBottom:"1px solid "+BRAND.border}}>
                       <th style={{textAlign:"left",padding:"3px 6px"}}>Dag</th>
                       <th style={{textAlign:"center",padding:"3px 6px"}}>Van</th>
                       <th style={{textAlign:"center",padding:"3px 6px"}}>Tot</th>
-                      <th style={{textAlign:"right",padding:"3px 6px"}}>Uur gewerkt</th>
+                      <th style={{textAlign:"right",padding:"3px 6px"}}>Uur</th>
                     </tr></thead>
                     <tbody>
-                      {(r.ai.dagen||[]).map((d,i)=>{
-                        const verdacht = d.uren > 11;
-                        return (
-                        <tr key={i} style={{borderBottom:"0.5px solid "+BRAND.border, background:verdacht?BRAND.warnBg:"transparent"}}>
-                          <td style={{padding:"3px 6px",textTransform:"capitalize"}}>{d.dag}{verdacht && <span title="Ongebruikelijk lange dag — controleer handmatig" style={{marginLeft:4}}>⚠️</span>}</td>
-                          <td style={{textAlign:"center",padding:"3px 6px"}}>{d.start||"— (afwezig)"}</td>
-                          <td style={{textAlign:"center",padding:"3px 6px"}}>{d.eind||"—"}</td>
-                          <td style={{textAlign:"right",padding:"3px 6px",fontWeight:600,color:verdacht?BRAND.warn:BRAND.text}}>{d.uren||0}u</td>
+                      {r.dagen.map((d,i)=>(
+                        <tr key={i} style={{borderBottom:"0.5px solid "+BRAND.border}}>
+                          <td style={{padding:"3px 6px",textTransform:"capitalize"}}>{d.dag}</td>
+                          <td style={{textAlign:"center",padding:"3px 6px"}}>{d.vrij?"— (vrij)":d.start}</td>
+                          <td style={{textAlign:"center",padding:"3px 6px"}}>{d.vrij?"—":d.eind}</td>
+                          <td style={{textAlign:"right",padding:"3px 6px",fontWeight:600}}>{d.vrij?0:Math.round(Math.max(0,tijdNaarUren(d.eind)-tijdNaarUren(d.start))*4)/4}u</td>
                         </tr>
-                        );
-                      })}
+                      ))}
                       <tr style={{fontWeight:700}}>
                         <td colSpan="3" style={{padding:"5px 6px",textAlign:"right"}}>Totaal gewerkt:</td>
                         <td style={{textAlign:"right",padding:"5px 6px"}}>{r.g}u</td>
                       </tr>
                     </tbody>
                   </table>
-                  {(r.ai.dagen||[]).some(d=>d.uren>11) && (
-                    <div style={{fontSize:11,color:BRAND.warn,marginBottom:8}}>⚠️ Eén of meer dagen zijn ongebruikelijk lang (&gt;11u) — controleer deze handmatig, de AI kan grijs/wit hebben verward.</div>
+                  {r.ai ? (
+                    <div style={{fontSize:12,color:BRAND.text,lineHeight:1.7}}>
+                      {r.ai.opmerking && <div style={{fontSize:12,color:BRAND.textMuted,marginBottom:6}}>ℹ {r.ai.opmerking}</div>}
+                      <div style={{fontWeight:600,marginBottom:2}}>Uit de agenda-screenshot (via kleurenlijst):</div>
+                      <div>🩺 Patiëntcontact: <b>{r.ai.patient}u</b></div>
+                      <div>📋 Overig productief (MT-uren, vergadering): <b>{r.ai.overigProductief}u</b></div>
+                      <div>💤 Niet-productief (aanwezig, geen waarde): <b>{r.ai.nietProductief}u</b></div>
+                      {r.ai.notitiePending>0 && <div>🟠 Notitie-blokken (nog niet bevestigd): <b>{r.ai.notitiePending}u</b> — ga naar Invoer om te bevestigen</div>}
+                    </div>
+                  ) : (
+                    <div style={{fontSize:12,color:BRAND.textMuted}}>Patiëntcontact is handmatig ingevoerd voor deze week — geen screenshot-uitsplitsing beschikbaar.</div>
                   )}
-                  <div style={{fontSize:12,color:BRAND.text,lineHeight:1.7}}>
-                    <div style={{fontWeight:600,marginBottom:2}}>Waarvan binnen het werkvenster:</div>
-                    <div>🩺 Patiëntcontact: <b>{r.ai.patient}u</b></div>
-                    <div>📋 Overig werk (o.a. MT-uren, contactmomenten): <b>{r.ai.overig}u</b></div>
-                    <div>👥 Vergadering: <b>{r.ai.vergadering}u</b></div>
-                    {r.ai.npPending>0 && <div>🟠 Oranje blokken (nog niet bevestigd): <b>{r.ai.npPending}u</b> — ga naar Invoer om dit te bevestigen</div>}
-                  </div>
                 </div>
               )}
             </div>
@@ -597,7 +715,8 @@ function TeamTab() {
     if (!wk || !weeks[wk]) return [];
     return collegas.map(c=>{
       const r = weeks[wk][c] || emptyRow();
-      const g = num(r.gewerkt), pt = num(r.patient);
+      const dagen = r.dagen || dagenDefault(c);
+      const g = berekenGewerktUitDagen(dagen), pt = num(r.patient);
       return { c, g, pt, p: pct(g,pt) };
     }).sort((a,b)=> (b.p??-1) - (a.p??-1));
   },[wk,weeks,collegas]);
