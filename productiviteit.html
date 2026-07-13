@@ -97,11 +97,14 @@ const BRAND = {
   warn:"#b45309", warnBg:"#fef3e2",
 };
 const META_ID = "_collegas";
+const META_INSTELLINGEN_ID = "_instellingen";
 const DEFAULT_COLLEGAS = ["Lars","Lonneke","Jan Willem","Mayke","Laura","Nikita","Julia","Jesper","Thomas","Lynn"];
 const DAG_NAMEN = ["maandag","dinsdag","woensdag","donderdag","vrijdag"];
 
 // Basisrooster per collega: [maandag, dinsdag, woensdag, donderdag, vrijdag], null = vrij
-const ROOSTER = {
+// Dit is de fallback-default; de werkelijk actieve waarden komen uit Supabase (id="_instellingen")
+// zodra die zijn opgeslagen via de Instellingen-tab, en overschrijven dit object bij het laden (reload()).
+let ROOSTER = {
   "Lars":        [["7:35","17:25"],["7:35","17:25"],null,["13:00","21:00"],["7:35","17:00"]],
   "Lonneke":     [["7:35","16:35"],["7:35","17:25"],["13:00","21:00"],null,["7:35","17:00"]],
   "Jan Willem":  [["7:35","16:35"],["6:30","16:35"],["13:00","21:00"],["13:00","17:50"],["7:35","15:05"]],
@@ -113,6 +116,7 @@ const ROOSTER = {
   "Thomas":      [null,["7:35","17:25"],["7:35","17:00"],["13:00","21:00"],["7:35","17:00"]],
   "Lynn":        [["13:00","21:00"],null,["7:30","17:00"],null,["8:00","17:00"]],
 };
+const ROOSTER_DEFAULT = JSON.parse(JSON.stringify(ROOSTER));
 
 // Kleurenlegenda: exacte hexcodes → betekenis en categorie.
 // categorie: "patient" (patiëntcontact), "overig_productief" (productief maar geen patiëntcontact,
@@ -198,6 +202,11 @@ function berekenGewerktUitDagen(dagen) {
   if (!Array.isArray(dagen)) return 0;
   return Math.round(dagen.reduce((s,d)=>s+berekenDagUren(d),0)*100)/100; // afronden op 2 decimalen, pas op het totaal
 }
+// Effectief gewerkt = rooster-uren + eventuele tijd die volgens de balielijst tóch is doorgewerkt
+// tijdens een officieel pauzeslot (bijv. een vergadering die de lunchpauze overlapt).
+function berekenEffectiefGewerkt(dagen, ai) {
+  return Math.round((berekenGewerktUitDagen(dagen) + ((ai && ai.pauzeCorrectieTotaal) || 0))*100)/100;
+}
 
 // Controleert of patient + overigProductief + nietProductief + notitiePending exact optelt tot de
 // rooster-based gewerkte uren. Corrigeert NIETS automatisch — geeft alleen aan of en hoeveel het afwijkt,
@@ -210,13 +219,22 @@ function controleerBreakdown(breakdown, gewerktTotaal) {
 function emptyRow() { return { dagen:null, patient:"", _ai:null }; }
 function emptyForm(collegas) { const f={}; collegas.forEach(c=>{f[c]=emptyRow();}); return f; }
 
-// Vaste MT-uren per week per collega — deze uren worden niet als aparte afspraak in Spotonmedics
-// geregistreerd, en dus ook niet in de balielijst-export gevonden. Vul hier de juiste waarden in
-// zodat ze automatisch bij "overig productief" worden opgeteld (en de optelsom weer klopt met "gewerkt").
-const MT_UREN_ROOSTER = {
-  "Lars": 7.9167, "Lonneke": 5.8333, "Jan Willem": 0, "Mayke": 0, "Laura": 0.8333,
-  "Nikita": 0, "Julia": 0, "Jesper": 0, "Thomas": 0, "Lynn": 0,
+// Vaste MT-uren per collega, per dag als tijdvak (net als ROOSTER) — deze tijd wordt niet als aparte
+// afspraak in Spotonmedics geregistreerd. Door het exacte tijdvak te kennen, kan de tool dit venster
+// zowel bij "overig productief" optellen als uitsluiten van de "niet-productief"-gat-detectie.
+const MT_UREN_ROOSTER_DEFAULT = {
+  "Lars":        [null, ["9:15","15:05"], null, null, ["9:15","12:25"]],
+  "Lonneke":     [["13:00","16:35"], null, null, null, ["13:00","14:15"]],
+  "Jan Willem":  [null, null, null, null, null],
+  "Mayke":       [null, null, null, null, null],
+  "Laura":       [null, null, null, ["14:15","15:05"], null],
+  "Nikita":      [null, null, null, null, null],
+  "Julia":       [null, null, null, null, null],
+  "Jesper":      [null, null, null, null, null],
+  "Thomas":      [null, null, null, null, null],
+  "Lynn":        [null, null, null, null, null],
 };
+let MT_UREN_ROOSTER = JSON.parse(JSON.stringify(MT_UREN_ROOSTER_DEFAULT));
 
 // ── BALIELIJST (Spotonmedics-export) — prestatiecode → categorie ─────
 // cat: "patient" (patiëntcontact), "overig_productief" (productief, geen patiëntcontact),
@@ -281,7 +299,9 @@ function bepaalDagNaam(waarde) {
 
 // Leest een balielijst-Excel (SheetJS) en levert een categorie-uitsplitsing + lijst onbekende codes.
 // Verzint NOOIT een categorie voor een onbekende code — die worden apart teruggegeven zodat de gebruiker gewaarschuwd wordt.
-async function parseBalielijstFile(file) {
+// dagenRooster: array van 5 {dag,start,eind,vrij} — regels die volledig buiten dit venster vallen tellen niet mee,
+// en gaten binnen het venster zonder afspraak/pauze tellen automatisch mee als niet-productief.
+async function parseBalielijstFile(file, dagenRooster, mtRooster) {
   const buf = await file.arrayBuffer();
   const wb = XLSX.read(buf, {type:"array", cellDates:true});
   const sheet = wb.Sheets[wb.SheetNames[0]];
@@ -299,7 +319,11 @@ async function parseBalielijstFile(file) {
   }
   if (headerIdx===-1) throw new Error("Kon de kolommen Datum/Tijdstip/Prestatiecode niet vinden in dit bestand");
 
-  const perDag = {}; DAG_NAMEN.forEach(d=>{ perDag[d]={patient:0,overig_productief:0,niet_productief:0,notitie:0}; });
+  const roosterPerDag = {};
+  DAG_NAMEN.forEach((d,i)=>{ roosterPerDag[d] = (dagenRooster && dagenRooster[i]) || {vrij:true}; });
+
+  const perDag = {}; const dagIntervals = {}; const pauzeDoorgewerkt = {};
+  DAG_NAMEN.forEach(d=>{ perDag[d]={patient:0,overig_productief:0,niet_productief:0,notitie:0}; dagIntervals[d]=[]; pauzeDoorgewerkt[d]=0; });
   const onbekend = {}; // code -> {label, uren}
 
   for (let i=headerIdx+1;i<rows.length;i++){
@@ -308,14 +332,23 @@ async function parseBalielijstFile(file) {
     const dagNaam = bepaalDagNaam(rij[col.datum]);
     if (!dagNaam || !perDag[dagNaam]) continue; // sla weekend/onbekende dagen over
 
-    const {start,eind} = parseTijdstip(rij[col.tijd]);
-    const duur = Math.max(0, tijdNaarUren(eind)-tijdNaarUren(start));
-    if (duur<=0) continue;
+    const rooster = roosterPerDag[dagNaam];
+    if (!rooster || rooster.vrij || !rooster.start || !rooster.eind) continue; // collega werkt die dag niet volgens rooster
+    const roosterStart = tijdNaarUren(rooster.start), roosterEind = tijdNaarUren(rooster.eind);
 
+    let {start,eind} = parseTijdstip(rij[col.tijd]);
     const prestatieRuw = String(rij[col.prestatie]).trim();
     const match = prestatieRuw.match(/^([A-Za-z0-9]+)\s*-\s*(.*)$/);
     const code = match ? match[1].trim() : prestatieRuw;
     const label = match ? match[2].trim() : "";
+
+    // Uitzondering: een Fyziotraining-groepszitting (1314) die om 20:00 begint, duurt altijd 60 minuten
+    // (ook als de balielijst een kortere eindtijd toont) — geldt uitsluitend voor 1314 om exact 20:00.
+    if (code==="1314" && start.trim()==="20:00") { eind = "21:00"; }
+
+    const s = tijdNaarUren(start), e = tijdNaarUren(eind);
+    const duur = overlapUren(s,e,roosterStart,roosterEind); // knip af op het roostervenster; buiten het venster telt niet mee
+    if (duur<=0) continue;
 
     const cat = zoekCategorie(code);
     if (!cat) {
@@ -324,7 +357,79 @@ async function parseBalielijstFile(file) {
       continue;
     }
     perDag[dagNaam][cat] = perDag[dagNaam][cat]+duur; // exacte optelling, geen tussentijdse afronding
+    // Overlapt deze regel met een officieel pauzeslot? Dan is die pauze feitelijk doorgewerkt —
+    // die tijd moet bij "gewerkt" opgeteld worden (want die wordt normaliter afgetrokken).
+    PAUZE_SLOTS.forEach(function(p){
+      pauzeDoorgewerkt[dagNaam] += overlapUren(Math.max(s,roosterStart),Math.min(e,roosterEind), tijdNaarUren(p[0]),tijdNaarUren(p[1]));
+    });
+    dagIntervals[dagNaam].push([Math.max(s,roosterStart), Math.min(e,roosterEind)]);
   }
+
+  // Overlap-surplus: als er meerdere afspraken op hetzelfde moment gepland staan (bijv. 2 patiënten in
+  // dezelfde groep), telt dat bewust dubbel mee in patiëntcontact (voor de productiviteit), maar dat mag
+  // "gewerkt" niet verhogen. Bereken hier het verschil tussen de ruwe (dubbeltellende) optelling en de
+  // werkelijke (gededupliceerde) klok-tijd die deze regels innemen, zodat dit verschil apart gehouden kan
+  // worden bij de consistentiecontrole in plaats van als fout gezien te worden.
+  const overlapSurplus = {};
+  DAG_NAMEN.forEach(d=>{
+    const rauweSom = dagIntervals[d].reduce((s,[a,b])=>s+(b-a),0);
+    const sorted = dagIntervals[d].slice().sort((a,b)=>a[0]-b[0]);
+    const merged=[];
+    sorted.forEach(([s,e])=>{
+      if (merged.length && s<=merged[merged.length-1][1]) merged[merged.length-1][1]=Math.max(merged[merged.length-1][1],e);
+      else merged.push([s,e]);
+    });
+    const gedupliceerdeSom = merged.reduce((s,[a,b])=>s+(b-a),0);
+    overlapSurplus[d] = Math.max(0, rauweSom-gedupliceerdeSom);
+  });
+
+  // MT-uren-vensters (indien opgegeven): vullen alleen het deel van het venster dat nog niet door een
+  // echte balielijst-regel of pauze is gedekt (voorkomt dubbeltelling), en tellen dat restdeel op bij
+  // overig productief. Het hele venster wordt daarna als 'gedekt' beschouwd voor de gat-detectie verderop.
+  let mtTotaalToegevoegd = 0;
+  DAG_NAMEN.forEach((d,i)=>{
+    const mt = mtRooster && mtRooster[i];
+    const rooster = roosterPerDag[d];
+    if (!mt || !rooster || rooster.vrij || !rooster.start || !rooster.eind) return;
+    const roosterStart = tijdNaarUren(rooster.start), roosterEind = tijdNaarUren(rooster.eind);
+    const mtStart = Math.max(tijdNaarUren(mt[0]),roosterStart), mtEind = Math.min(tijdNaarUren(mt[1]),roosterEind);
+    if (mtEind<=mtStart) return;
+
+    let intervals = dagIntervals[d].concat(PAUZE_SLOTS.map(p=>[tijdNaarUren(p[0]),tijdNaarUren(p[1])]));
+    intervals = intervals.map(([s,e])=>[Math.max(s,mtStart),Math.min(e,mtEind)]).filter(([s,e])=>e>s);
+    intervals.sort((a,b)=>a[0]-b[0]);
+    const merged=[];
+    intervals.forEach(([s,e])=>{
+      if (merged.length && s<=merged[merged.length-1][1]) merged[merged.length-1][1]=Math.max(merged[merged.length-1][1],e);
+      else merged.push([s,e]);
+    });
+    let cursor=mtStart, restMt=0;
+    merged.forEach(([s,e])=>{ if (s>cursor) restMt+=(s-cursor); cursor=Math.max(cursor,e); });
+    if (mtEind>cursor) restMt += (mtEind-cursor);
+
+    perDag[d].overig_productief += restMt;
+    mtTotaalToegevoegd += restMt;
+    dagIntervals[d].push([mtStart, mtEind]); // hele venster telt nu als gedekt voor de gat-detectie
+  });
+
+  // Gaten binnen het roostervenster (geen afspraak, geen pauze, geen MT-uren) tellen automatisch mee als niet-productief
+  DAG_NAMEN.forEach(d=>{
+    const rooster = roosterPerDag[d];
+    if (!rooster || rooster.vrij || !rooster.start || !rooster.eind) return;
+    const roosterStart = tijdNaarUren(rooster.start), roosterEind = tijdNaarUren(rooster.eind);
+    let intervals = dagIntervals[d].concat(PAUZE_SLOTS.map(p=>[tijdNaarUren(p[0]),tijdNaarUren(p[1])]));
+    intervals = intervals.map(([s,e])=>[Math.max(s,roosterStart),Math.min(e,roosterEind)]).filter(([s,e])=>e>s);
+    intervals.sort((a,b)=>a[0]-b[0]);
+    const merged=[];
+    intervals.forEach(([s,e])=>{
+      if (merged.length && s<=merged[merged.length-1][1]) merged[merged.length-1][1]=Math.max(merged[merged.length-1][1],e);
+      else merged.push([s,e]);
+    });
+    let cursor=roosterStart, gat=0;
+    merged.forEach(([s,e])=>{ if (s>cursor) gat+=(s-cursor); cursor=Math.max(cursor,e); });
+    if (roosterEind>cursor) gat += (roosterEind-cursor);
+    perDag[d].niet_productief += gat;
+  });
 
   const dagen = DAG_NAMEN.map(d=>({
     dag: d,
@@ -332,7 +437,10 @@ async function parseBalielijstFile(file) {
     overigProductief: Math.round(perDag[d].overig_productief*100)/100,
     nietProductief: Math.round(perDag[d].niet_productief*100)/100,
     notitie: Math.round(perDag[d].notitie*100)/100,
+    pauzeDoorgewerkt: Math.round(pauzeDoorgewerkt[d]*100)/100,
   }));
+  const pauzeCorrectieTotaal = Math.round(DAG_NAMEN.reduce((s,d)=>s+pauzeDoorgewerkt[d],0)*100)/100;
+  const overlapSurplusTotaal = Math.round(DAG_NAMEN.reduce((s,d)=>s+overlapSurplus[d],0)*100)/100;
   const patient = Math.round(DAG_NAMEN.reduce((s,d)=>s+perDag[d].patient,0)*100)/100;
   const overigProductief = Math.round(DAG_NAMEN.reduce((s,d)=>s+perDag[d].overig_productief,0)*100)/100;
   const nietProductief = Math.round(DAG_NAMEN.reduce((s,d)=>s+perDag[d].niet_productief,0)*100)/100;
@@ -342,6 +450,9 @@ async function parseBalielijstFile(file) {
     patient,
     breakdown: { dagen, patient, overigProductief, nietProductief, notitiePending, bron:"balielijst" },
     onbekendeCodes: Object.keys(onbekend).map(code=>({code, ...onbekend[code]})),
+    mtUrenToegevoegd: Math.round(mtTotaalToegevoegd*100)/100,
+    pauzeCorrectieTotaal,
+    overlapSurplusTotaal,
   };
 }
 
@@ -383,6 +494,7 @@ function InvoerTab({formData,setFormData}) {
   const [aiState,setAiState] = useState({}); // {[collega]: {status:'idle'|'loading'|'error', msg}} — puur voor de actie zelf, niet persistent
   const [npInput,setNpInput] = useState({}); // {[collega]: "1.5"} handmatige correctie voor 'notitie'-blokken
   const [editingDays,setEditingDays] = useState({}); // {[collega]: true} toont dag-editor voor uitzonderingen
+  const [editingMt,setEditingMt] = useState({}); // {[collega]: true} toont MT-uren-editor voor uitzonderingen
 
   useEffect(()=>{
     const wk = weeks[currentMonday];
@@ -400,6 +512,7 @@ function InvoerTab({formData,setFormData}) {
   },[]);
 
   function getDagen(c,row) { return (row && row.dagen) ? row.dagen : dagenDefault(c); }
+  function getMtRooster(c,row) { return (row && row._mtOverride) ? row._mtOverride : (MT_UREN_ROOSTER[c]||[null,null,null,null,null]); }
 
   function setDag(c, idx, field, value) {
     setFormData(p=>{
@@ -416,6 +529,23 @@ function InvoerTab({formData,setFormData}) {
     setSaved(false);
   }
 
+  function setMtOverrideDag(c, idx, field, value) {
+    setFormData(p=>{
+      const row = p[c];
+      const mtRooster = getMtRooster(c,row).map(d=>d?[d[0],d[1]]:null);
+      const huidig = mtRooster[idx] ? {start:mtRooster[idx][0],eind:mtRooster[idx][1],aan:true} : {start:"",eind:"",aan:false};
+      const bijgewerkt = {...huidig, [field]: value};
+      mtRooster[idx] = bijgewerkt.aan ? [bijgewerkt.start,bijgewerkt.eind] : null;
+      return {...p, [c]: {...row, _mtOverride: mtRooster}};
+    });
+    setSaved(false);
+  }
+
+  function resetMtOverride(c) {
+    setFormData(p=>({...p, [c]: {...p[c], _mtOverride:null}}));
+    setSaved(false);
+  }
+
   async function persist(dataToSave) {
     setSaving(true); setSaveErr("");
     try { await saveRow(currentMonday, dataToSave); await reload(); setSaved(true); }
@@ -428,17 +558,19 @@ function InvoerTab({formData,setFormData}) {
   async function handleBalielijst(c, file) {
     setAiState(p=>({...p,[c]:{status:"loading",msg:""}}));
     try {
-      const result = await parseBalielijstFile(file);
-      const mtUren = MT_UREN_ROOSTER[c] || 0;
-      const breakdownMetMt = { ...result.breakdown, overigProductief: Math.round((result.breakdown.overigProductief+mtUren)*100)/100 };
-      const patientMetMt = result.patient; // MT-uren zijn geen patiëntcontact, dus 'patient' blijft ongewijzigd
-      const gewerktTotaal = berekenGewerktUitDagen(getDagen(c, formData[c]));
-      const gecontroleerd = controleerBreakdown(breakdownMetMt, gewerktTotaal);
-      const opmerking = mtUren>0 ? mtUren+"u vaste MT-uren automatisch meegeteld bij overig productief" : "";
+      const dagenRooster = getDagen(c, formData[c]);
+      const mtRooster = getMtRooster(c, formData[c]);
+      const result = await parseBalielijstFile(file, dagenRooster, mtRooster);
+      const gewerktTotaal = berekenEffectiefGewerkt(dagenRooster, {pauzeCorrectieTotaal: result.pauzeCorrectieTotaal}) + result.overlapSurplusTotaal;
+      const gecontroleerd = controleerBreakdown(result.breakdown, gewerktTotaal);
+      const opmerkingDelen = [];
+      if (result.mtUrenToegevoegd>0) opmerkingDelen.push(result.mtUrenToegevoegd+"u MT-uren automatisch meegeteld bij overig productief");
+      if (result.pauzeCorrectieTotaal>0) opmerkingDelen.push(result.pauzeCorrectieTotaal+"u pauze doorgewerkt (telt als gewerkte tijd i.p.v. pauze)");
+      if (result.overlapSurplusTotaal>0) opmerkingDelen.push(result.overlapSurplusTotaal+"u dubbeltelling door gelijktijdige afspraken (bijv. 2 patiënten in 1 groep) — verhoogt productiviteit, niet gewerkte uren");
       const updated = {...formData, [c]:{
         ...formData[c],
-        patient:String(patientMetMt),
-        _ai:{ ...gecontroleerd, opmerking, onbekendeCodes:result.onbekendeCodes }
+        patient:String(result.patient),
+        _ai:{ ...gecontroleerd, opmerking:opmerkingDelen.join(" · "), onbekendeCodes:result.onbekendeCodes, pauzeCorrectieTotaal:result.pauzeCorrectieTotaal }
       }};
       setFormData(updated);
       setAiState(p=>({...p,[c]:{status: result.onbekendeCodes.length ? "warn" : "ok", msg:""}}));
@@ -481,6 +613,7 @@ function InvoerTab({formData,setFormData}) {
   return (
     <div>
       <SyncBar status={syncStatus} msg={syncMsg}/>
+
       <div className="sel-row">
         <label style={{fontSize:13,color:BRAND.textMuted,fontWeight:500}}>Week van maandag</label>
         <input type="date" value={currentMonday} onChange={e=>{setCurrentMonday(e.target.value);setSaved(false);}}/>
@@ -488,116 +621,165 @@ function InvoerTab({formData,setFormData}) {
         {weeks[currentMonday] && <span style={{padding:"2px 10px",borderRadius:20,fontSize:12,fontWeight:500,background:BRAND.bluePale,color:BRAND.blueDark}}>Eerder opgeslagen</span>}
       </div>
 
-      <div style={{display:"flex",gap:8,alignItems:"flex-start",background:BRAND.bluePale,border:"1px solid "+BRAND.blueBorder,borderRadius:8,padding:"10px 14px",marginBottom:"0.9rem",fontSize:12,color:BRAND.blueDark}}>
+      <div style={{display:"flex",gap:8,alignItems:"flex-start",background:BRAND.bluePale,border:"1px solid "+BRAND.blueBorder,borderRadius:8,padding:"10px 14px",marginBottom:"1.25rem",fontSize:12,color:BRAND.blueDark}}>
         <span>📅</span>
-        <span>"Uren gewerkt" komt automatisch uit ieders basisrooster, met de vaste pauzeblokken (10:05-10:20, 12:25-13:00, 15:05-15:20, 17:25-18:00) er al automatisch afgetrokken. Klik op "dagen aanpassen" bij een collega om uitzonderingen door te geven (vrij, later begonnen, eerder gestopt). Voor "Uren patiëntcontact": upload per collega de balielijst-export uit Spotonmedics (.xlsx) — volledig automatisch en zonder AI verwerkt.</span>
+        <span>"Uren gewerkt" komt automatisch uit ieders basisrooster (pauzes al verrekend). Voor "Patiëntcontact": upload de balielijst-export uit Spotonmedics (.xlsx) — volledig automatisch, zonder AI. Rooster of MT-uren blijvend anders? Ga naar het tabblad "Instellingen".</span>
       </div>
 
-      <div className="tbl-wrap" style={{marginBottom:"1rem"}}>
-        <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
-          <thead><tr style={{background:BRAND.purple}}>
-            {["Collega","Balielijst","Uren gewerkt","Uren patiëntcontact","Productiviteit"].map((h,i)=>(
-              <th key={i} style={{textAlign:i===0?"left":"center",padding:"9px 10px",fontWeight:500,fontSize:12,color:"rgba(255,255,255,0.9)",whiteSpace:"nowrap"}}>{h}</th>
-            ))}
-          </tr></thead>
-          <tbody>
-            {collegas.map(c=>{
-              const row = formData[c] || emptyRow();
-              const dagen = getDagen(c,row);
-              const gewerkt = berekenGewerktUitDagen(dagen);
-              const p = pct(gewerkt, num(row.patient));
-              const st = aiState[c] || {status:"idle",msg:""};
-              const isAangepast = !!row.dagen;
-              return (
-                <React.Fragment key={c}>
-                <tr style={{borderBottom:"0.5px solid "+BRAND.border}}>
-                  <td style={{padding:"8px 10px",fontWeight:500,color:BRAND.text}}>{c}</td>
-                  <td style={{textAlign:"center",padding:"6px 8px"}}>
+      <div style={{display:"flex",flexDirection:"column",gap:12,marginBottom:"1.5rem"}}>
+        {collegas.map(c=>{
+          const row = formData[c] || emptyRow();
+          const dagen = getDagen(c,row);
+          const mtRooster = getMtRooster(c,row);
+          const gewerkt = berekenEffectiefGewerkt(dagen, row._ai);
+          const p = pct(gewerkt, num(row.patient));
+          const st = aiState[c] || {status:"idle",msg:""};
+          const isAangepast = !!row.dagen;
+          const mtAangepast = !!row._mtOverride;
+          const heeftData = gewerkt>0 || row.patient!=="" || isAangepast || mtAangepast || row._ai;
+
+          return (
+            <div key={c} style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderRadius:14,overflow:"hidden",borderLeft:"4px solid "+pctColor(p)}}>
+
+              {/* Header: naam + productiviteit */}
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:BRAND.purplePale,borderBottom:"1px solid "+BRAND.border}}>
+                <span style={{fontSize:14,fontWeight:600,color:BRAND.text}}>{c}</span>
+                <span style={{fontSize:20,fontWeight:700,color:pctColor(p)}}>{p==null?"—":p+"%"}</span>
+              </div>
+
+              <div style={{padding:"14px 16px"}}>
+                {/* Kerncijfers naast elkaar */}
+                <div style={{display:"flex",flexWrap:"wrap",gap:20,marginBottom:12}}>
+                  <div>
+                    <div style={{fontSize:11,color:BRAND.textMuted,fontWeight:500,marginBottom:2}}>Uren gewerkt</div>
+                    <div style={{fontSize:18,fontWeight:700,color:BRAND.text}}>{gewerkt}u</div>
+                    <div style={{display:"flex",gap:8,marginTop:2}}>
+                      <button onClick={()=>setEditingDays(p=>({...p,[c]:!p[c]}))}
+                        style={{background:"none",border:"none",color:BRAND.blueDark,fontSize:10,textDecoration:"underline",cursor:"pointer",padding:0,fontFamily:"'Poppins',sans-serif"}}>
+                        {editingDays[c] ? "verberg dagen" : "dagen aanpassen"}
+                      </button>
+                      <button onClick={()=>setEditingMt(p=>({...p,[c]:!p[c]}))}
+                        style={{background:"none",border:"none",color:BRAND.blueDark,fontSize:10,textDecoration:"underline",cursor:"pointer",padding:0,fontFamily:"'Poppins',sans-serif"}}>
+                        {editingMt[c] ? "verberg MT-uren" : "MT-uren aanpassen"}
+                      </button>
+                    </div>
+                    {(isAangepast||mtAangepast) && <div style={{fontSize:9,color:BRAND.warn,marginTop:2}}>afwijkend van standaard {isAangepast&&mtAangepast?"(rooster + MT-uren)":isAangepast?"(rooster)":"(MT-uren)"} deze week</div>}
+                  </div>
+
+                  <div>
+                    <div style={{fontSize:11,color:BRAND.textMuted,fontWeight:500,marginBottom:2}}>Patiëntcontact</div>
+                    <input type="number" min="0" step="0.5" value={row.patient} style={{width:80,textAlign:"center",fontSize:15,fontWeight:600}}
+                      onChange={e=>onVal(c,"patient",e.target.value)}/>
+                    <div style={{fontSize:9,color:BRAND.textMuted,marginTop:2}}>uur</div>
+                  </div>
+
+                  <div style={{marginLeft:"auto",display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
                     <input type="file" accept=".xlsx,.xls,.csv" id={"bl-"+c} style={{display:"none"}}
                       onChange={e=>{ const f=e.target.files[0]; if(f) handleBalielijst(c,f); e.target.value=""; }}/>
                     <button onClick={()=>document.getElementById("bl-"+c).click()} disabled={st.status==="loading"}
-                      title="Upload balielijst-export (.xlsx)"
-                      style={{background:"transparent",border:"1px solid "+BRAND.purpleBorder,borderRadius:6,padding:"5px 10px",fontSize:13,cursor:st.status==="loading"?"not-allowed":"pointer",color:BRAND.purpleMid,fontFamily:"'Poppins',sans-serif"}}>
-                      {st.status==="loading"?"⏳":"📋"}
+                      style={{background:BRAND.purpleMid,color:"#fff",border:"none",borderRadius:8,padding:"8px 16px",fontSize:12,fontWeight:500,cursor:st.status==="loading"?"not-allowed":"pointer",fontFamily:"'Poppins',sans-serif",display:"flex",alignItems:"center",gap:6}}>
+                      {st.status==="loading" ? "⏳ Bezig…" : <>📋 Upload balielijst</>}
                     </button>
-                    {row._ai && st.status!=="loading" && <div style={{fontSize:10,color:BRAND.blueDark,marginTop:3}}>📋 Balielijst-ingevuld</div>}
-                    {st.status==="error" && <div style={{fontSize:10,color:BRAND.danger,marginTop:3,maxWidth:120}}>⚠ {st.msg}</div>}
-                    {row._ai && row._ai.onbekendeCodes && row._ai.onbekendeCodes.length>0 && (
-                      <div style={{fontSize:10,color:"#fff",marginTop:3,maxWidth:160,background:BRAND.warn,borderRadius:5,padding:"4px 6px",textAlign:"left"}}>
-                        ⚠ Onbekende code(s), NIET meegeteld:
-                        {row._ai.onbekendeCodes.map((o,i)=>(<div key={i}>• {o.code} — {o.label} ({o.uren}u)</div>))}
-                      </div>
-                    )}
-                    {row._ai && row._ai.klopt===false && (
-                      <div style={{fontSize:10,color:"#fff",marginTop:3,maxWidth:150,background:BRAND.danger,borderRadius:5,padding:"3px 6px",textAlign:"left"}}>
-                        ⚠ Optelsom klopt niet: {row._ai.som}u vs {String(gewerkt)}u gewerkt (verschil {row._ai.verschil>0?"+":""}{row._ai.verschil}u) — controleer handmatig
-                      </div>
-                    )}
-                    {row._ai && row._ai.opmerking && <div style={{fontSize:10,color:BRAND.textMuted,marginTop:3,maxWidth:120}}>ℹ {row._ai.opmerking}</div>}
-                    {(gewerkt>0 || row.patient!=="" || isAangepast) && (
+                    {row._ai && st.status!=="loading" && <span style={{fontSize:10,color:BRAND.blueDark}}>✓ balielijst verwerkt</span>}
+                    {heeftData && (
                       <button onClick={()=>removeUpload(c)} title="Wis alle gegevens van deze collega voor deze week"
-                        style={{background:"none",border:"none",color:BRAND.danger,fontSize:10,textDecoration:"underline",cursor:"pointer",padding:0,marginTop:3,fontFamily:"'Poppins',sans-serif"}}>
+                        style={{background:"none",border:"none",color:BRAND.danger,fontSize:10,textDecoration:"underline",cursor:"pointer",padding:0,fontFamily:"'Poppins',sans-serif"}}>
                         ✕ wis deze week
                       </button>
                     )}
-                    {row._ai && (
-                      <div style={{fontSize:10,color:BRAND.textMuted,marginTop:3}}>Uitsplitsing: zie tab "Per collega"</div>
+                  </div>
+                </div>
+
+                {/* Statusmeldingen, netjes gegroepeerd */}
+                {(st.status==="error" || (row._ai && (row._ai.klopt===false || row._ai.opmerking || (row._ai.onbekendeCodes&&row._ai.onbekendeCodes.length>0) || row._ai.notitiePending>0))) && (
+                  <div style={{display:"flex",flexDirection:"column",gap:6,marginTop:4,marginBottom:4}}>
+                    {st.status==="error" && (
+                      <div style={{fontSize:12,color:"#fff",background:BRAND.danger,borderRadius:6,padding:"7px 10px"}}>⚠ {st.msg}</div>
+                    )}
+                    {row._ai && row._ai.klopt===false && (
+                      <div style={{fontSize:12,color:"#fff",background:BRAND.danger,borderRadius:6,padding:"7px 10px"}}>
+                        ⚠ Optelsom klopt niet: {row._ai.som}u vs {Math.round(gewerkt*100)/100}u gewerkt (verschil {row._ai.verschil>0?"+":""}{row._ai.verschil}u) — controleer handmatig
+                      </div>
+                    )}
+                    {row._ai && row._ai.onbekendeCodes && row._ai.onbekendeCodes.length>0 && (
+                      <div style={{fontSize:12,color:"#fff",background:BRAND.warn,borderRadius:6,padding:"7px 10px"}}>
+                        ⚠ Onbekende code(s), NIET meegeteld: {row._ai.onbekendeCodes.map(o=>o.code+" ("+o.label+", "+o.uren+"u)").join(", ")}
+                      </div>
+                    )}
+                    {row._ai && row._ai.opmerking && (
+                      <div style={{fontSize:12,color:BRAND.textMuted,background:BRAND.purplePale,borderRadius:6,padding:"7px 10px"}}>ℹ {row._ai.opmerking}</div>
                     )}
                     {row._ai && row._ai.notitiePending>0 && (
-                      <div style={{fontSize:10,color:BRAND.warn,marginTop:5,background:BRAND.warnBg,border:"1px solid "+BRAND.warn,borderRadius:6,padding:"5px 6px",maxWidth:140,textAlign:"left"}}>
-                        🟠 {row._ai.notitiePending}u in "notitie"-blokken. Hoeveel telt mee als productief (niet-patiëntcontact)?
-                        <div style={{display:"flex",gap:4,marginTop:4}}>
+                      <div style={{fontSize:12,color:BRAND.warn,background:BRAND.warnBg,border:"1px solid "+BRAND.warn,borderRadius:6,padding:"8px 10px"}}>
+                        🟠 {row._ai.notitiePending}u in "notitie"-blokken — hoeveel telt mee als productief (niet-patiëntcontact)?
+                        <div style={{display:"flex",gap:6,marginTop:6}}>
                           <input type="number" min="0" max={row._ai.notitiePending} step="0.25" value={npInput[c]||""} placeholder="0"
                             onChange={e=>setNpInput(p=>({...p,[c]:e.target.value}))}
-                            style={{width:44,minHeight:26,padding:"2px 4px",fontSize:11,textAlign:"center"}}/>
-                          <button onClick={()=>confirmNotitie(c)} style={{background:BRAND.warn,color:"#fff",border:"none",borderRadius:5,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"'Poppins',sans-serif"}}>OK</button>
+                            style={{width:56,padding:"4px 6px",fontSize:12,textAlign:"center"}}/>
+                          <button onClick={()=>confirmNotitie(c)} style={{background:BRAND.warn,color:"#fff",border:"none",borderRadius:5,padding:"4px 12px",fontSize:12,cursor:"pointer",fontFamily:"'Poppins',sans-serif"}}>OK</button>
                         </div>
                       </div>
                     )}
-                  </td>
-                  <td style={{textAlign:"center",padding:"6px 8px"}}>
-                    <div style={{fontWeight:600,color:BRAND.text}}>{gewerkt}u</div>
-                    <button onClick={()=>setEditingDays(p=>({...p,[c]:!p[c]}))}
-                      style={{background:"none",border:"none",color:BRAND.blueDark,fontSize:10,textDecoration:"underline",cursor:"pointer",padding:0,fontFamily:"'Poppins',sans-serif"}}>
-                      {editingDays[c] ? "verberg dagen" : "dagen aanpassen"}
-                    </button>
-                    {isAangepast && <div style={{fontSize:9,color:BRAND.warn,marginTop:2}}>afwijkend van rooster</div>}
-                  </td>
-                  <td style={{textAlign:"center",padding:"6px 8px"}}>
-                    <input type="number" min="0" step="0.5" value={row.patient} style={{width:70,textAlign:"center"}}
-                      onChange={e=>onVal(c,"patient",e.target.value)}/>
-                  </td>
-                  <td style={{textAlign:"center",padding:"6px 8px",fontWeight:600,color:pctColor(p)}}>{p==null?"—":p+"%"}</td>
-                </tr>
+                    {row._ai && (
+                      <div style={{fontSize:11,color:BRAND.textMuted}}>Volledige uitsplitsing: zie tabblad "Per collega"</div>
+                    )}
+                  </div>
+                )}
+
+                {/* Dagen-editor (uitzondering deze week) */}
                 {editingDays[c] && (
-                  <tr>
-                    <td colSpan="5" style={{padding:"8px 10px",background:BRAND.purplePale}}>
-                      <div style={{display:"flex",flexWrap:"wrap",gap:10,alignItems:"flex-end"}}>
-                        {dagen.map((d,i)=>(
-                          <div key={i} style={{display:"flex",flexDirection:"column",gap:3}}>
-                            <label style={{fontSize:10,fontWeight:600,color:BRAND.textMuted,textTransform:"capitalize"}}>{d.dag}</label>
-                            <label style={{display:"flex",alignItems:"center",gap:3,fontSize:10,color:BRAND.text}}>
-                              <input type="checkbox" checked={!!d.vrij} onChange={e=>setDag(c,i,"vrij",e.target.checked)}/> vrij
+                  <div style={{marginTop:10,background:BRAND.purplePale,borderRadius:8,padding:"12px 14px"}}>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:14,alignItems:"flex-end"}}>
+                      {dagen.map((d,i)=>(
+                        <div key={i} style={{display:"flex",flexDirection:"column",gap:4}}>
+                          <label style={{fontSize:10,fontWeight:600,color:BRAND.textMuted,textTransform:"capitalize"}}>{d.dag}</label>
+                          <label style={{display:"flex",alignItems:"center",gap:4,fontSize:10,color:BRAND.text}}>
+                            <input type="checkbox" checked={!!d.vrij} onChange={e=>setDag(c,i,"vrij",e.target.checked)}/> vrij
+                          </label>
+                          {!d.vrij && (
+                            <div style={{display:"flex",gap:4}}>
+                              <input type="text" placeholder="7:35" value={d.start} onChange={e=>setDag(c,i,"start",e.target.value)} style={{width:54,fontSize:11,padding:"4px 5px"}}/>
+                              <span style={{fontSize:11,color:BRAND.textMuted}}>–</span>
+                              <input type="text" placeholder="17:00" value={d.eind} onChange={e=>setDag(c,i,"eind",e.target.value)} style={{width:54,fontSize:11,padding:"4px 5px"}}/>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                      <button onClick={()=>resetRooster(c)} style={{background:"none",border:"1px solid "+BRAND.purpleBorder,borderRadius:6,padding:"6px 12px",fontSize:11,cursor:"pointer",color:BRAND.purpleMid,fontFamily:"'Poppins',sans-serif",height:30}}>↺ reset naar rooster</button>
+                    </div>
+                  </div>
+                )}
+
+                {/* MT-uren-editor (uitzondering deze week) */}
+                {editingMt[c] && (
+                  <div style={{marginTop:10,background:BRAND.bluePale,borderRadius:8,padding:"12px 14px"}}>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:14,alignItems:"flex-end"}}>
+                      {mtRooster.map((d,i)=>{
+                        const aan = !!d;
+                        return (
+                          <div key={i} style={{display:"flex",flexDirection:"column",gap:4}}>
+                            <label style={{fontSize:10,fontWeight:600,color:BRAND.textMuted,textTransform:"capitalize"}}>{DAG_NAMEN[i]}</label>
+                            <label style={{display:"flex",alignItems:"center",gap:4,fontSize:10,color:BRAND.text}}>
+                              <input type="checkbox" checked={aan} onChange={e=>setMtOverrideDag(c,i,"aan",e.target.checked)}/> MT-uren
                             </label>
-                            {!d.vrij && (
-                              <div style={{display:"flex",gap:3}}>
-                                <input type="text" placeholder="7:35" value={d.start} onChange={e=>setDag(c,i,"start",e.target.value)} style={{width:52,fontSize:11,padding:"3px 4px"}}/>
+                            {aan && (
+                              <div style={{display:"flex",gap:4}}>
+                                <input type="text" placeholder="13:00" value={d?d[0]:""} onChange={e=>setMtOverrideDag(c,i,"start",e.target.value)} style={{width:54,fontSize:11,padding:"4px 5px"}}/>
                                 <span style={{fontSize:11,color:BRAND.textMuted}}>–</span>
-                                <input type="text" placeholder="17:00" value={d.eind} onChange={e=>setDag(c,i,"eind",e.target.value)} style={{width:52,fontSize:11,padding:"3px 4px"}}/>
+                                <input type="text" placeholder="16:35" value={d?d[1]:""} onChange={e=>setMtOverrideDag(c,i,"eind",e.target.value)} style={{width:54,fontSize:11,padding:"4px 5px"}}/>
                               </div>
                             )}
                           </div>
-                        ))}
-                        <button onClick={()=>resetRooster(c)} style={{background:"none",border:"1px solid "+BRAND.purpleBorder,borderRadius:6,padding:"5px 10px",fontSize:11,cursor:"pointer",color:BRAND.purpleMid,fontFamily:"'Poppins',sans-serif",height:28}}>↺ reset naar rooster</button>
-                      </div>
-                    </td>
-                  </tr>
+                        );
+                      })}
+                      <button onClick={()=>resetMtOverride(c)} style={{background:"none",border:"1px solid "+BRAND.blueBorder,borderRadius:6,padding:"6px 12px",fontSize:11,cursor:"pointer",color:BRAND.blueDark,fontFamily:"'Poppins',sans-serif",height:30}}>↺ reset naar standaard</button>
+                    </div>
+                  </div>
                 )}
-                </React.Fragment>
-              );
-            })}
-          </tbody>
-        </table>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:"1.25rem",flexWrap:"wrap"}}>
@@ -605,28 +787,12 @@ function InvoerTab({formData,setFormData}) {
         <button onClick={handleAddCollega} style={{background:"transparent",border:"1px solid "+BRAND.purpleBorder,borderRadius:8,padding:"8px 14px",fontSize:12,cursor:"pointer",color:BRAND.purpleMid,fontFamily:"'Poppins',sans-serif"}}>+ Collega toevoegen</button>
       </div>
 
-      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:"1.5rem"}}>
+      <div style={{display:"flex",alignItems:"center",gap:12}}>
         <button onClick={handleSave} disabled={saving} style={{background:BRAND.blueDark,color:"#fff",border:"none",borderRadius:8,padding:"9px 24px",fontSize:13,fontWeight:500,cursor:saving?"not-allowed":"pointer",opacity:saving?0.7:1,fontFamily:"'Poppins',sans-serif"}}>
           {saving?"Opslaan…":"Opslaan"}
         </button>
         {saved && <span style={{fontSize:13,color:BRAND.success}}>☁ Opgeslagen en gesynchroniseerd</span>}
         {saveErr && <span style={{fontSize:13,color:BRAND.danger}}>⚠ {saveErr}</span>}
-      </div>
-
-      <div style={{fontSize:13,fontWeight:500,color:BRAND.textMuted,marginBottom:10}}>Deze week in één oogopslag</div>
-      <div className="card-grid">
-        {collegas.map(c=>{
-          const row = formData[c] || emptyRow();
-          const gewerkt = berekenGewerktUitDagen(getDagen(c,row));
-          const p = pct(gewerkt, num(row.patient));
-          return (
-            <div key={c} style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderRadius:10,padding:"12px 14px",borderLeft:"3px solid "+pctColor(p)}}>
-              <div style={{fontSize:13,fontWeight:500,color:BRAND.text,marginBottom:4}}>{c}</div>
-              <div style={{fontSize:22,fontWeight:600,color:pctColor(p)}}>{p==null?"—":p+"%"}</div>
-              <div style={{fontSize:11,color:BRAND.textMuted}}>{num(row.patient)}u pat. / {gewerkt}u werk</div>
-            </div>
-          );
-        })}
       </div>
     </div>
   );
@@ -646,7 +812,7 @@ function CollegaTab() {
       .map(wk => {
         const r = weeks[wk][sel];
         const dagen = r.dagen || dagenDefault(sel);
-        const g = berekenGewerktUitDagen(dagen);
+        const g = berekenEffectiefGewerkt(dagen, r._ai);
         const pt = num(r.patient);
         if (g===0 && pt===0 && !r._ai) return null;
         return { wk, g, pt, p: pct(g,pt), dagen, ai: r._ai || null };
@@ -742,11 +908,37 @@ function CollegaTab() {
                       )}
                       <div style={{fontSize:11,color:BRAND.textMuted,marginBottom:4}}>Bron: balielijst-export (Spotonmedics)</div>
                       {r.ai.opmerking && <div style={{fontSize:12,color:BRAND.textMuted,marginBottom:6}}>ℹ {r.ai.opmerking}</div>}
-                      <div style={{fontWeight:600,marginBottom:2}}>Uit de balielijst-export (via prestatiecodes):</div>
+
+                      <div style={{fontWeight:600,marginBottom:4}}>Per dag, uit de balielijst-export (gaten in de agenda tellen automatisch mee als niet-productief):</div>
+                      <table style={{fontSize:11,borderCollapse:"collapse",width:"100%",marginBottom:10}}>
+                        <thead><tr style={{color:BRAND.textMuted,borderBottom:"1px solid "+BRAND.border}}>
+                          <th style={{textAlign:"left",padding:"3px 5px"}}>Dag</th>
+                          <th style={{textAlign:"right",padding:"3px 5px"}}>🩺 Patiënt</th>
+                          <th style={{textAlign:"right",padding:"3px 5px"}}>📋 Overig</th>
+                          <th style={{textAlign:"right",padding:"3px 5px"}}>💤 Niet-prod.</th>
+                          <th style={{textAlign:"right",padding:"3px 5px"}}>🟠 Notitie</th>
+                          <th style={{textAlign:"right",padding:"3px 5px",fontWeight:700}}>Rooster</th>
+                        </tr></thead>
+                        <tbody>
+                          {r.ai.dagen.map((d,i)=>(
+                            <tr key={i} style={{borderBottom:"0.5px solid "+BRAND.border}}>
+                              <td style={{padding:"3px 5px",textTransform:"capitalize"}}>{d.dag}</td>
+                              <td style={{textAlign:"right",padding:"3px 5px"}}>{d.patient}u</td>
+                              <td style={{textAlign:"right",padding:"3px 5px"}}>{d.overigProductief}u</td>
+                              <td style={{textAlign:"right",padding:"3px 5px"}}>{d.nietProductief}u</td>
+                              <td style={{textAlign:"right",padding:"3px 5px"}}>{d.notitie}u</td>
+                              <td style={{textAlign:"right",padding:"3px 5px",fontWeight:700}}>{Math.round(berekenDagUren(r.dagen[i])*100)/100}u</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+
+                      <div style={{fontWeight:600,marginBottom:2}}>Weektotalen:</div>
                       <div>🩺 Patiëntcontact: <b>{r.ai.patient}u</b></div>
                       <div>📋 Overig productief (MT-uren, vergadering): <b>{r.ai.overigProductief}u</b></div>
-                      <div>💤 Niet-productief (aanwezig, geen waarde): <b>{r.ai.nietProductief}u</b></div>
+                      <div>💤 Niet-productief (aanwezig, geen patiënt/gat in agenda): <b>{r.ai.nietProductief}u</b></div>
                       {r.ai.notitiePending>0 && <div>🟠 Notitie-blokken (nog niet bevestigd): <b>{r.ai.notitiePending}u</b> — ga naar Invoer om te bevestigen</div>}
+                      {(r.ai.ongelogd||0)>0 && <div>❓ Niet in Spotonmedics gelogd (bijv. wachttijd tussen afspraken): <b>{r.ai.ongelogd}u</b></div>}
                     </div>
                   ) : (
                     <div style={{fontSize:12,color:BRAND.textMuted}}>Patiëntcontact is handmatig ingevoerd voor deze week — geen balielijst-uitsplitsing beschikbaar.</div>
@@ -772,7 +964,7 @@ function TeamTab() {
     return collegas.map(c=>{
       const r = weeks[wk][c] || emptyRow();
       const dagen = r.dagen || dagenDefault(c);
-      const g = berekenGewerktUitDagen(dagen), pt = num(r.patient);
+      const g = berekenEffectiefGewerkt(dagen, r._ai), pt = num(r.patient);
       return { c, g, pt, p: pct(g,pt) };
     }).sort((a,b)=> (b.p??-1) - (a.p??-1));
   },[wk,weeks,collegas]);
@@ -814,6 +1006,122 @@ function TeamTab() {
 }
 
 // ── ROOT APP ──────────────────────────────────────────────────────────
+// ── INSTELLINGEN TAB — rooster & MT-uren blijvend aanpassen ──────────
+function InstellingenTab() {
+  const {collegas,reload} = React.useContext(DataCtx);
+  const [sel,setSel] = useState(collegas[0]||"");
+  useEffect(()=>{ if(!sel && collegas.length) setSel(collegas[0]); },[collegas]);
+  const [rooster,setRooster] = useState(()=>roosterVoorCollega(sel).map(d=>d?{start:d[0],eind:d[1],vrij:false}:{start:"",eind:"",vrij:true}));
+  const [mt,setMt] = useState(()=>(MT_UREN_ROOSTER[sel]||[null,null,null,null,null]).map(d=>d?{start:d[0],eind:d[1],aan:true}:{start:"",eind:"",aan:false}));
+  const [saving,setSaving] = useState(false);
+  const [saved,setSaved] = useState(false);
+
+  useEffect(()=>{
+    setRooster(roosterVoorCollega(sel).map(d=>d?{start:d[0],eind:d[1],vrij:false}:{start:"",eind:"",vrij:true}));
+    setMt((MT_UREN_ROOSTER[sel]||[null,null,null,null,null]).map(d=>d?{start:d[0],eind:d[1],aan:true}:{start:"",eind:"",aan:false}));
+    setSaved(false);
+  },[sel]);
+
+  function setRoosterDag(i,field,value){ setRooster(p=>{ const n=p.map(d=>({...d})); n[i][field]=value; return n; }); setSaved(false); }
+  function setMtDag(i,field,value){ setMt(p=>{ const n=p.map(d=>({...d})); n[i][field]=value; return n; }); setSaved(false); }
+
+  async function opslaan(){
+    setSaving(true);
+    try {
+      const roosterArr = rooster.map(d=> d.vrij ? null : [d.start,d.eind]);
+      const mtArr = mt.map(d=> d.aan ? [d.start,d.eind] : null);
+      ROOSTER[sel]=roosterArr;
+      MT_UREN_ROOSTER[sel]=mtArr;
+      const bestaande = {}; // haal bestaande instellingen op zodat andere collega's niet verloren gaan
+      try { const r = await fetch(SB_URL+"/"+TABLE+"?id=eq."+encodeURIComponent(META_INSTELLINGEN_ID)+"&select=data",{headers:SB_HDR}); const j=await r.json(); if(j&&j[0]) Object.assign(bestaande, j[0].data); } catch(e){}
+      const nieuweData = {
+        rooster: {...(bestaande.rooster||{}), [sel]: roosterArr},
+        mtUren: {...(bestaande.mtUren||{}), [sel]: mtArr},
+      };
+      await saveRow(META_INSTELLINGEN_ID, nieuweData);
+      await reload();
+      setSaved(true);
+    } finally { setSaving(false); }
+  }
+
+  function resetNaarStandaard(){
+    const std = ROOSTER_DEFAULT[sel] || [null,null,null,null,null];
+    setRooster(std.map(d=>d?{start:d[0],eind:d[1],vrij:false}:{start:"",eind:"",vrij:true}));
+    const stdMt = MT_UREN_ROOSTER_DEFAULT[sel] || [null,null,null,null,null];
+    setMt(stdMt.map(d=>d?{start:d[0],eind:d[1],aan:true}:{start:"",eind:"",aan:false}));
+    setSaved(false);
+  }
+
+  return (
+    <div>
+      <div style={{display:"flex",gap:8,alignItems:"flex-start",background:BRAND.bluePale,border:"1px solid "+BRAND.blueBorder,borderRadius:8,padding:"10px 14px",marginBottom:"1.25rem",fontSize:12,color:BRAND.blueDark}}>
+        <span>⚙️</span>
+        <span>Wijzigingen hier gelden <b>blijvend</b>, voor alle toekomstige weken. Wil je iets aanpassen voor slechts één specifieke week (bijv. iemand is een dag ziek), gebruik dan "dagen aanpassen" of "MT-uren aanpassen" bij Invoer — dat overschrijft deze instelling alleen voor die ene week.</span>
+      </div>
+
+      <div className="sel-row">
+        <label style={{fontSize:13,color:BRAND.textMuted,fontWeight:500}}>Collega</label>
+        <select value={sel} onChange={e=>setSel(e.target.value)}>
+          {collegas.map(c=><option key={c} value={c}>{c}</option>)}
+        </select>
+      </div>
+
+      <div style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderRadius:12,padding:"18px",marginBottom:"1rem"}}>
+        <div style={{fontSize:13,fontWeight:600,color:BRAND.text,marginBottom:12}}>Basisrooster</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:14}}>
+          {rooster.map((d,i)=>(
+            <div key={i} style={{display:"flex",flexDirection:"column",gap:5,minWidth:100}}>
+              <label style={{fontSize:11,fontWeight:600,color:BRAND.textMuted,textTransform:"capitalize"}}>{DAG_NAMEN[i]}</label>
+              <label style={{display:"flex",alignItems:"center",gap:4,fontSize:11,color:BRAND.text}}>
+                <input type="checkbox" checked={d.vrij} onChange={e=>setRoosterDag(i,"vrij",e.target.checked)}/> vrije dag
+              </label>
+              {!d.vrij && (
+                <div style={{display:"flex",gap:4,alignItems:"center"}}>
+                  <input type="text" placeholder="7:35" value={d.start} onChange={e=>setRoosterDag(i,"start",e.target.value)} style={{width:56,fontSize:12,padding:"4px 5px"}}/>
+                  <span style={{fontSize:11,color:BRAND.textMuted}}>–</span>
+                  <input type="text" placeholder="17:00" value={d.eind} onChange={e=>setRoosterDag(i,"eind",e.target.value)} style={{width:56,fontSize:12,padding:"4px 5px"}}/>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderRadius:12,padding:"18px",marginBottom:"1.25rem"}}>
+        <div style={{fontSize:13,fontWeight:600,color:BRAND.text,marginBottom:4}}>Vaste MT-uren</div>
+        <div style={{fontSize:11,color:BRAND.textMuted,marginBottom:12}}>Niet in Spotonmedics geregistreerd — wordt automatisch bij "overig productief" opgeteld na een balielijst-upload.</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:14}}>
+          {mt.map((d,i)=>(
+            <div key={i} style={{display:"flex",flexDirection:"column",gap:5,minWidth:100}}>
+              <label style={{fontSize:11,fontWeight:600,color:BRAND.textMuted,textTransform:"capitalize"}}>{DAG_NAMEN[i]}</label>
+              <label style={{display:"flex",alignItems:"center",gap:4,fontSize:11,color:BRAND.text}}>
+                <input type="checkbox" checked={d.aan} onChange={e=>setMtDag(i,"aan",e.target.checked)}/> MT-uren
+              </label>
+              {d.aan && (
+                <div style={{display:"flex",gap:4,alignItems:"center"}}>
+                  <input type="text" placeholder="13:00" value={d.start} onChange={e=>setMtDag(i,"start",e.target.value)} style={{width:56,fontSize:12,padding:"4px 5px"}}/>
+                  <span style={{fontSize:11,color:BRAND.textMuted}}>–</span>
+                  <input type="text" placeholder="16:35" value={d.eind} onChange={e=>setMtDag(i,"eind",e.target.value)} style={{width:56,fontSize:12,padding:"4px 5px"}}/>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{display:"flex",alignItems:"center",gap:12}}>
+        <button onClick={opslaan} disabled={saving} style={{background:BRAND.blueDark,color:"#fff",border:"none",borderRadius:8,padding:"9px 24px",fontSize:13,fontWeight:500,cursor:saving?"not-allowed":"pointer",opacity:saving?0.7:1,fontFamily:"'Poppins',sans-serif"}}>
+          {saving?"Opslaan…":"Blijvend opslaan"}
+        </button>
+        <button onClick={resetNaarStandaard} style={{background:"none",border:"1px solid "+BRAND.purpleBorder,borderRadius:8,padding:"9px 18px",fontSize:13,cursor:"pointer",color:BRAND.purpleMid,fontFamily:"'Poppins',sans-serif"}}>
+          ↺ Reset naar oorspronkelijk
+        </button>
+        {saved && <span style={{fontSize:13,color:BRAND.success}}>☁ Opgeslagen voor alle toekomstige weken</span>}
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [tab,setTab] = useState("invoer");
   useEffect(()=>{ window.__setTab = (id) => setTab(id); return ()=>{ delete window.__setTab; }; },[]);
@@ -822,6 +1130,7 @@ function App() {
   const [collegas,setCollegas] = useState(DEFAULT_COLLEGAS);
   const [syncStatus,setSyncStatus] = useState("loading");
   const [syncMsg,setSyncMsg] = useState("");
+  const [instellingenVersion,setInstellingenVersion] = useState(0);
 
   async function reload() {
     setSyncStatus("loading");
@@ -829,7 +1138,13 @@ function App() {
       const d = await loadAll();
       const meta = d[META_ID];
       setCollegas(meta && Array.isArray(meta.list) && meta.list.length ? meta.list : DEFAULT_COLLEGAS);
-      const wkData = {...d}; delete wkData[META_ID];
+      const instellingen = d[META_INSTELLINGEN_ID];
+      if (instellingen) {
+        if (instellingen.rooster) Object.keys(instellingen.rooster).forEach(c=>{ ROOSTER[c]=instellingen.rooster[c]; });
+        if (instellingen.mtUren) Object.keys(instellingen.mtUren).forEach(c=>{ MT_UREN_ROOSTER[c]=instellingen.mtUren[c]; });
+      }
+      setInstellingenVersion(v=>v+1);
+      const wkData = {...d}; delete wkData[META_ID]; delete wkData[META_INSTELLINGEN_ID];
       setWeeks(wkData);
       setSyncStatus("ok"); setSyncMsg("");
     } catch(e) {
@@ -844,11 +1159,12 @@ function App() {
     try { await saveRow(META_ID, {list}); } catch(e) { /* stil falen, lijst blijft lokaal zichtbaar */ }
   }
 
-  const ctxValue = useMemo(()=>({weeks,collegas,reload,syncStatus,syncMsg,addCollega}),[weeks,collegas,syncStatus,syncMsg]);
+  const ctxValue = useMemo(()=>({weeks,collegas,reload,syncStatus,syncMsg,addCollega,instellingenVersion}),[weeks,collegas,syncStatus,syncMsg,instellingenVersion]);
   const tabs = [
     {id:"invoer", label:"Invoer", icon:"✏️"},
     {id:"collega", label:"Per collega", icon:"👤"},
     {id:"team", label:"Team", icon:"👥"},
+    {id:"instellingen", label:"Instellingen", icon:"⚙️"},
   ];
 
   useEffect(()=>{
@@ -893,6 +1209,7 @@ function App() {
                 {tab==="invoer" && <InvoerTab formData={formData} setFormData={setFormData}/>}
                 {tab==="collega" && <CollegaTab/>}
                 {tab==="team" && <TeamTab/>}
+                {tab==="instellingen" && <InstellingenTab/>}
               </>
           }
           <div style={{marginTop:"1.5rem",paddingTop:"1rem",borderTop:"0.5px solid "+BRAND.border,display:"flex",justifyContent:"flex-end",fontSize:11,color:BRAND.textMuted,alignItems:"center",gap:6}}>
