@@ -585,7 +585,13 @@ function InvoerTab({formData,setFormData}) {
     const extra = num(npInput[c]);
     const row = formData[c];
     if (!row._ai) return;
-    const bijgewerkt = {...row._ai, overigProductief: Math.round((row._ai.overigProductief+extra)*100)/100, notitiePending: Math.round((row._ai.notitiePending-extra)*100)/100};
+    const rest = Math.max(0, Math.round((row._ai.notitiePending-extra)*100)/100);
+    const bijgewerkt = {
+      ...row._ai,
+      overigProductief: Math.round((row._ai.overigProductief+extra)*100)/100,
+      nietProductief: Math.round((row._ai.nietProductief+rest)*100)/100,
+      notitiePending: 0,
+    };
     const gewerktTotaal = berekenGewerktUitDagen(getDagen(c,row));
     const updated = {...formData, [c]:{
       ...row,
@@ -711,7 +717,7 @@ function InvoerTab({formData,setFormData}) {
                     )}
                     {row._ai && row._ai.notitiePending>0 && (
                       <div style={{fontSize:12,color:BRAND.warn,background:BRAND.warnBg,border:"1px solid "+BRAND.warn,borderRadius:6,padding:"8px 10px"}}>
-                        🟠 {row._ai.notitiePending}u in "notitie"-blokken binnen werktijd — hoeveel telt mee als productief?
+                        🟠 {row._ai.notitiePending}u in "notitie"-blokken binnen werktijd — hoeveel telt mee als productief? (de rest wordt automatisch niet-productief)
                         <div style={{display:"flex",gap:6,marginTop:6}}>
                           <input type="number" min="0" max={row._ai.notitiePending} step="0.25" value={npInput[c]||""} placeholder="0"
                             onChange={e=>setNpInput(p=>({...p,[c]:e.target.value}))}
@@ -931,6 +937,16 @@ function CollegaTab() {
                             </tr>
                           ))}
                         </tbody>
+                        <tfoot>
+                          <tr style={{fontWeight:700,borderTop:"1px solid "+BRAND.border}}>
+                            <td style={{padding:"5px 5px",textAlign:"left"}}>Totaal</td>
+                            <td style={{textAlign:"right",padding:"5px 5px"}}>{r.ai.patient}u</td>
+                            <td style={{textAlign:"right",padding:"5px 5px"}}>{r.ai.overigProductief}u</td>
+                            <td style={{textAlign:"right",padding:"5px 5px"}}>{r.ai.nietProductief}u</td>
+                            <td style={{textAlign:"right",padding:"5px 5px"}}>{r.ai.notitiePending}u</td>
+                            <td style={{textAlign:"right",padding:"5px 5px"}}>{r.g}u</td>
+                          </tr>
+                        </tfoot>
                       </table>
 
                       <div style={{fontWeight:600,marginBottom:2}}>Weektotalen:</div>
