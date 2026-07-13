@@ -711,7 +711,7 @@ function InvoerTab({formData,setFormData}) {
                     )}
                     {row._ai && row._ai.notitiePending>0 && (
                       <div style={{fontSize:12,color:BRAND.warn,background:BRAND.warnBg,border:"1px solid "+BRAND.warn,borderRadius:6,padding:"8px 10px"}}>
-                        🟠 {row._ai.notitiePending}u in "notitie"-blokken — hoeveel telt mee als productief (niet-patiëntcontact)?
+                        🟠 {row._ai.notitiePending}u in "notitie"-blokken binnen werktijd — hoeveel telt mee als productief?
                         <div style={{display:"flex",gap:6,marginTop:6}}>
                           <input type="number" min="0" max={row._ai.notitiePending} step="0.25" value={npInput[c]||""} placeholder="0"
                             onChange={e=>setNpInput(p=>({...p,[c]:e.target.value}))}
@@ -937,7 +937,7 @@ function CollegaTab() {
                       <div>🩺 Patiëntcontact: <b>{r.ai.patient}u</b></div>
                       <div>📋 Overig productief (MT-uren, vergadering): <b>{r.ai.overigProductief}u</b></div>
                       <div>💤 Niet-productief (aanwezig, geen patiënt/gat in agenda): <b>{r.ai.nietProductief}u</b></div>
-                      {r.ai.notitiePending>0 && <div>🟠 Notitie-blokken (nog niet bevestigd): <b>{r.ai.notitiePending}u</b> — ga naar Invoer om te bevestigen</div>}
+                      {r.ai.notitiePending>0 && <div>🟠 Notitie-blokken binnen werktijd (nog niet bevestigd): <b>{r.ai.notitiePending}u</b> — ga naar Invoer om te bevestigen</div>}
                       {(r.ai.ongelogd||0)>0 && <div>❓ Niet in Spotonmedics gelogd (bijv. wachttijd tussen afspraken): <b>{r.ai.ongelogd}u</b></div>}
                     </div>
                   ) : (
