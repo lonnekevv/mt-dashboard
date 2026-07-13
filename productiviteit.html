@@ -170,6 +170,13 @@ function getMondayStr(d) { const day=d.getDay(),diff=d.getDate()-day+(day===0?-6
 function formatWeekLabel(s) { const mon=new Date(s+"T00:00:00"),fri=new Date(mon); fri.setDate(mon.getDate()+4); return mon.getDate()+" – "+fri.toLocaleDateString("nl-NL",{day:"numeric",month:"long",year:"numeric"}); }
 function num(v) { const n=parseFloat(String(v).replace(",",".")); return isNaN(n)?0:n; }
 function pct(gewerkt, patient) { return gewerkt>0 ? Math.round((patient/gewerkt)*1000)/10 : null; }
+// Productiviteit% is gebaseerd op ALLE productieve tijd: patiëntcontact + overig productief (MT-uren/vergadering)
+// + fyziotraining — niet alleen pure patiëntcontact. Niet-productief en notitie tellen niet mee.
+function productieveUren(row) {
+  const basis = num(row.patient);
+  if (!row._ai) return basis;
+  return Math.round((basis + (row._ai.overigProductief||0) + (row._ai.fyziotraining||0))*100)/100;
+}
 function pctColor(p) {
   if (p==null) return BRAND.textMuted;
   if (p>=75) return BRAND.success;
@@ -212,7 +219,7 @@ function berekenEffectiefGewerkt(dagen, ai) {
 // rooster-based gewerkte uren. Corrigeert NIETS automatisch — geeft alleen aan of en hoeveel het afwijkt,
 // zodat dit zichtbaar is en handmatig gecorrigeerd kan worden.
 function controleerBreakdown(breakdown, gewerktTotaal) {
-  const som = Math.round((breakdown.patient + breakdown.overigProductief + breakdown.nietProductief + breakdown.notitiePending)*100)/100;
+  const som = Math.round((breakdown.patient + (breakdown.fyziotraining||0) + breakdown.overigProductief + breakdown.nietProductief + breakdown.notitiePending)*100)/100;
   const verschil = Math.round((som-gewerktTotaal)*100)/100;
   return { ...breakdown, som, klopt: Math.abs(verschil)<0.03, verschil };
 }
@@ -250,7 +257,6 @@ const CODE_LEGEND = {};
     "120","121","123","124", // echo/shockwave/strippenkaart/agraves
     "129","130", // performance analyse/test
     "131", // compex
-    "1314","1316", // groepszitting
     "132","134", // game ready
     "133","135", // vkb testen/evaluatie
     "136","137","138", // performance training
@@ -262,8 +268,10 @@ const CODE_LEGEND = {};
     "777","7773", // orofaciaal
     "996", // sportspreekuur
   ];
+  const fyziotraining = ["1314","1316"]; // groepszitting Fyziotraining — eigen categorie, geen patiëntcontact
   const nietProductief = ["1960","1961","1962","998"];
   patient.forEach(c=>{ CODE_LEGEND[c]="patient"; });
+  fyziotraining.forEach(c=>{ CODE_LEGEND[c]="fyziotraining"; });
   nietProductief.forEach(c=>{ CODE_LEGEND[c]="niet_productief"; });
   CODE_LEGEND["VERG"]="overig_productief";
   CODE_LEGEND["NOT"]="notitie";
@@ -323,7 +331,7 @@ async function parseBalielijstFile(file, dagenRooster, mtRooster) {
   DAG_NAMEN.forEach((d,i)=>{ roosterPerDag[d] = (dagenRooster && dagenRooster[i]) || {vrij:true}; });
 
   const perDag = {}; const dagIntervals = {}; const pauzeDoorgewerkt = {};
-  DAG_NAMEN.forEach(d=>{ perDag[d]={patient:0,overig_productief:0,niet_productief:0,notitie:0}; dagIntervals[d]=[]; pauzeDoorgewerkt[d]=0; });
+  DAG_NAMEN.forEach(d=>{ perDag[d]={patient:0,fyziotraining:0,overig_productief:0,niet_productief:0,notitie:0}; dagIntervals[d]=[]; pauzeDoorgewerkt[d]=0; });
   const onbekend = {}; // code -> {label, uren}
 
   for (let i=headerIdx+1;i<rows.length;i++){
@@ -434,6 +442,7 @@ async function parseBalielijstFile(file, dagenRooster, mtRooster) {
   const dagen = DAG_NAMEN.map(d=>({
     dag: d,
     patient: Math.round(perDag[d].patient*100)/100,
+    fyziotraining: Math.round(perDag[d].fyziotraining*100)/100,
     overigProductief: Math.round(perDag[d].overig_productief*100)/100,
     nietProductief: Math.round(perDag[d].niet_productief*100)/100,
     notitie: Math.round(perDag[d].notitie*100)/100,
@@ -442,13 +451,14 @@ async function parseBalielijstFile(file, dagenRooster, mtRooster) {
   const pauzeCorrectieTotaal = Math.round(DAG_NAMEN.reduce((s,d)=>s+pauzeDoorgewerkt[d],0)*100)/100;
   const overlapSurplusTotaal = Math.round(DAG_NAMEN.reduce((s,d)=>s+overlapSurplus[d],0)*100)/100;
   const patient = Math.round(DAG_NAMEN.reduce((s,d)=>s+perDag[d].patient,0)*100)/100;
+  const fyziotrainingTotaal = Math.round(DAG_NAMEN.reduce((s,d)=>s+perDag[d].fyziotraining,0)*100)/100;
   const overigProductief = Math.round(DAG_NAMEN.reduce((s,d)=>s+perDag[d].overig_productief,0)*100)/100;
   const nietProductief = Math.round(DAG_NAMEN.reduce((s,d)=>s+perDag[d].niet_productief,0)*100)/100;
   const notitiePending = Math.round(DAG_NAMEN.reduce((s,d)=>s+perDag[d].notitie,0)*100)/100;
 
   return {
     patient,
-    breakdown: { dagen, patient, overigProductief, nietProductief, notitiePending, bron:"balielijst" },
+    breakdown: { dagen, patient, fyziotraining:fyziotrainingTotaal, overigProductief, nietProductief, notitiePending, bron:"balielijst" },
     onbekendeCodes: Object.keys(onbekend).map(code=>({code, ...onbekend[code]})),
     mtUrenToegevoegd: Math.round(mtTotaalToegevoegd*100)/100,
     pauzeCorrectieTotaal,
@@ -638,7 +648,7 @@ function InvoerTab({formData,setFormData}) {
           const dagen = getDagen(c,row);
           const mtRooster = getMtRooster(c,row);
           const gewerkt = berekenEffectiefGewerkt(dagen, row._ai);
-          const p = pct(gewerkt, num(row.patient));
+          const p = pct(gewerkt, productieveUren(row));
           const st = aiState[c] || {status:"idle",msg:""};
           const isAangepast = !!row.dagen;
           const mtAangepast = !!row._mtOverride;
@@ -821,7 +831,7 @@ function CollegaTab() {
         const g = berekenEffectiefGewerkt(dagen, r._ai);
         const pt = num(r.patient);
         if (g===0 && pt===0 && !r._ai) return null;
-        return { wk, g, pt, p: pct(g,pt), dagen, ai: r._ai || null };
+        return { wk, g, pt, p: pct(g,productieveUren(r)), dagen, ai: r._ai || null };
       }).filter(Boolean);
   },[weeks,sel]);
 
@@ -920,6 +930,7 @@ function CollegaTab() {
                         <thead><tr style={{color:BRAND.textMuted,borderBottom:"1px solid "+BRAND.border}}>
                           <th style={{textAlign:"left",padding:"3px 5px"}}>Dag</th>
                           <th style={{textAlign:"right",padding:"3px 5px"}}>🩺 Patiënt</th>
+                          <th style={{textAlign:"right",padding:"3px 5px"}}>🤸 Fyziotr.</th>
                           <th style={{textAlign:"right",padding:"3px 5px"}}>📋 Overig</th>
                           <th style={{textAlign:"right",padding:"3px 5px"}}>💤 Niet-prod.</th>
                           <th style={{textAlign:"right",padding:"3px 5px"}}>🟠 Notitie</th>
@@ -930,6 +941,7 @@ function CollegaTab() {
                             <tr key={i} style={{borderBottom:"0.5px solid "+BRAND.border}}>
                               <td style={{padding:"3px 5px",textTransform:"capitalize"}}>{d.dag}</td>
                               <td style={{textAlign:"right",padding:"3px 5px"}}>{d.patient}u</td>
+                              <td style={{textAlign:"right",padding:"3px 5px"}}>{d.fyziotraining||0}u</td>
                               <td style={{textAlign:"right",padding:"3px 5px"}}>{d.overigProductief}u</td>
                               <td style={{textAlign:"right",padding:"3px 5px"}}>{d.nietProductief}u</td>
                               <td style={{textAlign:"right",padding:"3px 5px"}}>{d.notitie}u</td>
@@ -939,18 +951,21 @@ function CollegaTab() {
                         </tbody>
                         <tfoot>
                           <tr style={{fontWeight:700,borderTop:"1px solid "+BRAND.border}}>
-                            <td style={{padding:"5px 5px",textAlign:"left"}}>Totaal</td>
+                            <td style={{padding:"5px 5px",textAlign:"left"}}>Totaal geteld</td>
                             <td style={{textAlign:"right",padding:"5px 5px"}}>{r.ai.patient}u</td>
+                            <td style={{textAlign:"right",padding:"5px 5px"}}>{r.ai.fyziotraining||0}u</td>
                             <td style={{textAlign:"right",padding:"5px 5px"}}>{r.ai.overigProductief}u</td>
                             <td style={{textAlign:"right",padding:"5px 5px"}}>{r.ai.nietProductief}u</td>
                             <td style={{textAlign:"right",padding:"5px 5px"}}>{r.ai.notitiePending}u</td>
-                            <td style={{textAlign:"right",padding:"5px 5px"}}>{r.g}u</td>
+                            <td style={{textAlign:"right",padding:"5px 5px",color:BRAND.blueDark}}>{r.ai.som}u</td>
                           </tr>
                         </tfoot>
                       </table>
+                      <div style={{fontSize:11,color:BRAND.textMuted,marginBottom:10}}>De rechteronderste waarde ({r.ai.som}u) is de som van alle geteld categorieën — vergelijk dit met "Totaal gewerkt" hierboven ({r.g}u) om te zien of (en hoeveel) ze afwijken.</div>
 
                       <div style={{fontWeight:600,marginBottom:2}}>Weektotalen:</div>
                       <div>🩺 Patiëntcontact: <b>{r.ai.patient}u</b></div>
+                      <div>🤸 Fyziotraining (groepszitting): <b>{r.ai.fyziotraining||0}u</b></div>
                       <div>📋 Overig productief (MT-uren, vergadering): <b>{r.ai.overigProductief}u</b></div>
                       <div>💤 Niet-productief (aanwezig, geen patiënt/gat in agenda): <b>{r.ai.nietProductief}u</b></div>
                       {r.ai.notitiePending>0 && <div>🟠 Notitie-blokken binnen werktijd (nog niet bevestigd): <b>{r.ai.notitiePending}u</b> — ga naar Invoer om te bevestigen</div>}
@@ -981,7 +996,7 @@ function TeamTab() {
       const r = weeks[wk][c] || emptyRow();
       const dagen = r.dagen || dagenDefault(c);
       const g = berekenEffectiefGewerkt(dagen, r._ai), pt = num(r.patient);
-      return { c, g, pt, p: pct(g,pt) };
+      return { c, g, pt, p: pct(g,productieveUren(r)) };
     }).sort((a,b)=> (b.p??-1) - (a.p??-1));
   },[wk,weeks,collegas]);
 
