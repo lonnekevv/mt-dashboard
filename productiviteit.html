@@ -9,6 +9,7 @@
 <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js" crossorigin></script>
 <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
 <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.23.10/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Poppins', sans-serif; background: #f6f0f4; min-height: 100vh; }
@@ -197,140 +198,132 @@ function berekenGewerktUitDagen(dagen) {
   if (!Array.isArray(dagen)) return 0;
   return Math.round(dagen.reduce((s,d)=>s+berekenDagUren(d),0)*4)/4;
 }
+
+// Controleert of patient + overigProductief + nietProductief + notitiePending exact optelt tot de
+// rooster-based gewerkte uren. Corrigeert NIETS automatisch — geeft alleen aan of en hoeveel het afwijkt,
+// zodat dit zichtbaar is en handmatig gecorrigeerd kan worden.
+function controleerBreakdown(breakdown, gewerktTotaal) {
+  const som = Math.round((breakdown.patient + breakdown.overigProductief + breakdown.nietProductief + breakdown.notitiePending)*4)/4;
+  const verschil = Math.round((som-gewerktTotaal)*4)/4;
+  return { ...breakdown, som, klopt: Math.abs(verschil)<0.26, verschil };
+}
 function emptyRow() { return { dagen:null, patient:"", _ai:null }; }
 function emptyForm(collegas) { const f={}; collegas.forEach(c=>{f[c]=emptyRow();}); return f; }
 
-// ── AI: agenda-screenshot → uren per categorie ────────────────────────
-function fileToBase64(file) {
-  return new Promise((resolve,reject)=>{
-    const r = new FileReader();
-    r.onload = () => resolve(r.result.split(",")[1]);
-    r.onerror = () => reject(new Error("Kon bestand niet lezen"));
-    r.readAsDataURL(file);
-  });
+// ── BALIELIJST (Spotonmedics-export) — prestatiecode → categorie ─────
+// cat: "patient" (patiëntcontact), "overig_productief" (productief, geen patiëntcontact),
+// "niet_productief" (aanwezig, telt niet mee), "notitie" (handmatig te bevestigen, zoals NOT)
+const CODE_LEGEND = {};
+(function(){
+  const patient = [
+    "010001","010002","010003","010006","010011","010012","010014","010015","010016","010017","010018", // Exclufit
+    "1000", // reguliere zitting
+    "10007","10008","10009", // fyziofit
+    "1001", // uitbehandeling
+    "1064", // intake coulance
+    "120","121","123","124", // echo/shockwave/strippenkaart/agraves
+    "129","130", // performance analyse/test
+    "131", // compex
+    "1314","1316", // groepszitting
+    "132","134", // game ready
+    "133","135", // vkb testen/evaluatie
+    "136","137","138", // performance training
+    "1400", // eenmalig onderzoek
+    "1700","1701","1702", // lange zitting
+    "1820","1863","1864","1870","1871","1876","1877", // intake
+    "190", // osteopathie
+    "300","310", // zaal/veld revalidatie
+    "777","7773", // orofaciaal
+    "996", // sportspreekuur
+  ];
+  const nietProductief = ["1960","1961","1962","998"];
+  patient.forEach(c=>{ CODE_LEGEND[c]="patient"; });
+  nietProductief.forEach(c=>{ CODE_LEGEND[c]="niet_productief"; });
+  CODE_LEGEND["VERG"]="overig_productief";
+  CODE_LEGEND["NOT"]="notitie";
+})();
+function zoekCategorie(code) {
+  if (/^950/.test(code)) return "patient"; // alle 950xxx-codes zijn ZorgTopics → patiëntcontact
+  return CODE_LEGEND[code] || null;
 }
 
-// De AGENDA_PROMPT en de aanroep naar de Anthropic API leven weer client-side,
-// net als bij de andere Fyzio Totaal-tools (KLACHT-assistent, Peesklachten-tool):
-// eenmalige API-key invoer, opgeslagen in localStorage onder 'ft_apikey'.
-
-function getApiKey() {
-  return localStorage.getItem("ft_apikey") || "";
+function parseTijdstip(t) {
+  const parts = String(t).split("-").map(s=>s.trim());
+  return { start: parts[0]||"", eind: parts[1]||"" };
+}
+function dagAfkortingNaarNaam(afk) {
+  const map = {ma:"maandag",di:"dinsdag",wo:"woensdag",do:"donderdag",vr:"vrijdag",za:"zaterdag",zo:"zondag"};
+  return map[String(afk).toLowerCase().trim()] || null;
 }
 
-function vraagApiKey() {
-  return new Promise(function(resolve) {
-    var overlay = document.createElement("div");
-    overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px";
-    overlay.innerHTML = '<div style="background:#fff;border-radius:12px;padding:24px;max-width:380px;width:100%;font-family:\'Poppins\',sans-serif"><p style="font-size:15px;font-weight:700;color:#82176D;margin-bottom:8px">API key invoeren</p><p style="font-size:13px;color:#555;line-height:1.6;margin-bottom:16px">Voer eenmalig de API key in. Deze wordt opgeslagen in je browser en hoef je daarna niet opnieuw in te voeren.</p><input id="prod-apikey-input" type="password" placeholder="sk-ant-api03-..." style="width:100%;padding:10px 12px;border-radius:8px;border:1.5px solid #e6cde0;font-size:14px;box-sizing:border-box;margin-bottom:8px;font-family:monospace"><p id="prod-apikey-fout" style="font-size:12px;color:#f87171;display:none;margin-bottom:8px">Voer een geldige key in (begint met sk-ant-).</p><button id="prod-apikey-opslaan" style="width:100%;padding:11px;border-radius:8px;border:none;background:#82176D;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:\'Poppins\',sans-serif">Opslaan en doorgaan</button></div>';
-    document.body.appendChild(overlay);
-    var input = overlay.querySelector("#prod-apikey-input");
-    var btn = overlay.querySelector("#prod-apikey-opslaan");
-    var fout = overlay.querySelector("#prod-apikey-fout");
-    var opslaan = function() {
-      var val = input.value.trim();
-      if (!val.startsWith("sk-ant-")) { fout.style.display = "block"; return; }
-      localStorage.setItem("ft_apikey", val);
-      document.body.removeChild(overlay);
-      resolve(val);
-    };
-    btn.onclick = opslaan;
-    input.onkeydown = function(e) { if (e.key === "Enter") opslaan(); };
-  });
-}
+// Leest een balielijst-Excel (SheetJS) en levert een categorie-uitsplitsing + lijst onbekende codes.
+// Verzint NOOIT een categorie voor een onbekende code — die worden apart teruggegeven zodat de gebruiker gewaarschuwd wordt.
+async function parseBalielijstFile(file) {
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, {type:"array"});
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(sheet, {header:1, raw:false, defval:""});
+  if (!rows.length) throw new Error("Leeg bestand of kon geen data vinden");
 
-async function zorgVoorApiKey() {
-  var key = getApiKey();
-  if (!key) key = await vraagApiKey();
-  return key;
-}
-
-const AGENDA_PROMPT_INTRO = "Je krijgt een screenshot van de weekagenda van één fysio-collega bij Fyzio Totaal. De agenda heeft vijf kolommen (maandag t/m vrijdag); de datum staat bovenaan de kolom, de dagnaam staat er direct onder. Elke rij heeft links een tijdstip en rechts een blok dat duurt tot het volgende tijdstip.\n\n"
-  + "De begin- en eindtijd van de werkdag hoef je NIET te bepalen (dat komt uit een vast rooster). Jouw enige taak is: classificeer elk blok in de agenda op basis van zijn achtergrondkleur, aan de hand van de EXACTE kleurenlijst hieronder. Vergelijk de kleur van elk blok met deze lijst en kies de dichtstbijzijnde match.\n\n"
-  + "BELANGRIJK: blokken ZONDER tekst tellen net zo goed mee als blokken met tekst — classificeer puur op de achtergrondkleur, ook als het vak leeg oogt. \"MT-uren\" (#0AFFFF, een felle cyaan/turkoois) zijn bijvoorbeeld vaak volledig blanco maar hebben wél die duidelijke cyaan kleur — mis deze niet en verwar ze niet met \"FyzioFit uur\" (#AB7DBF, een dof grijspaars), dat is een heel andere, veel minder felle kleur.\n\n"
-  + "KLEURENLIJST (hexcode → betekenis → categorie):\n";
-
-function bouwLegendaTekst() {
-  return COLOR_LEGEND.map(function(c){
-    var extra = c.conditioneel ? " [LET OP: telt alleen mee als er ook echt \"Patientafspraak\"-tekst bij dit blok staat; is het leeg/blanco zonder patiënt, dan telt het NERGENS in mee]" : "";
-    return c.hex + " = \"" + c.label + "\" → categorie: " + c.cat + extra;
-  }).join("\n");
-}
-
-const AGENDA_PROMPT_OUTRO = "\n\nCategorieën uitgelegd:\n"
-  + "- \"patient\": patiëntcontact.\n"
-  + "- \"overig_productief\": geen patiëntcontact, maar wel productieve werktijd voor de praktijk (MT-uren, vergadertijd).\n"
-  + "- \"niet_productief\": aanwezig, maar telt niet mee als productief (bijv. FyzioFit uur-label zelf, contactmoment, afgemelde afspraken).\n"
-  + "- \"afwezig\": pauze/vakantie/afwezigheid — negeer volledig, telt nergens in mee.\n"
-  + "- \"notitie\": kleur #FFA142, onduidelijk of dit productief is — tel dit apart op, het wordt straks handmatig bevestigd.\n\n"
-  + "Sla tekstregels die beginnen met \"-\" en die ONDER een ander blok staan volledig over — dat zijn persoonlijke notities, geen blokken.\n\n"
-  + "Tel per dag het totaal aantal uren per categorie op (op basis van start- en eindtijd van elk blok, afgerond op kwartieren). Antwoord ALLEEN met een geldig JSON-object in dit formaat, zonder andere tekst of markdown-opmaak:\n"
-  + "{\"dagen\":[{\"dag\":\"maandag\",\"patient_uren\":0,\"overig_productief_uren\":0,\"niet_productief_uren\":0,\"notitie_uren\":0},{\"dag\":\"dinsdag\",\"patient_uren\":0,\"overig_productief_uren\":0,\"niet_productief_uren\":0,\"notitie_uren\":0},{\"dag\":\"woensdag\",\"patient_uren\":0,\"overig_productief_uren\":0,\"niet_productief_uren\":0,\"notitie_uren\":0},{\"dag\":\"donderdag\",\"patient_uren\":0,\"overig_productief_uren\":0,\"niet_productief_uren\":0,\"notitie_uren\":0},{\"dag\":\"vrijdag\",\"patient_uren\":0,\"overig_productief_uren\":0,\"niet_productief_uren\":0,\"notitie_uren\":0}],\"opmerking\":\"\"}\n\n"
-  + "Het veld \"opmerking\" mag een korte (max 20 woorden) toelichting bevatten over onzekere interpretaties, anders een lege string.";
-
-async function analyzeAgendaScreenshot(base64, mediaType) {
-  const apiKey = await zorgVoorApiKey();
-  const promptText = AGENDA_PROMPT_INTRO + bouwLegendaTekst() + AGENDA_PROMPT_OUTRO;
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-5",
-      max_tokens: 2000,
-      messages: [{
-        role: "user",
-        content: [
-          { type: "image", source: { type:"base64", media_type: mediaType || "image/png", data: base64 } },
-          { type: "text", text: promptText }
-        ]
-      }]
-    })
-  });
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error("HTTP "+response.status+": "+errText);
+  // Zoek header-rij en kolomindices
+  let headerIdx=-1, col={};
+  for (let i=0;i<Math.min(rows.length,10);i++){
+    const rij = rows[i].map(v=>String(v).toLowerCase().trim());
+    const dIdx = rij.findIndex(v=>v.includes("datum"));
+    const tIdx = rij.findIndex(v=>v.includes("tijdstip"));
+    const pIdx = rij.findIndex(v=>v.includes("prestatie"));
+    if (dIdx!==-1 && tIdx!==-1 && pIdx!==-1) { headerIdx=i; col={datum:dIdx,tijd:tIdx,prestatie:pIdx}; break; }
   }
-  const data = await response.json();
-  const textOut = data.content.map(function(b){ return b.text || ""; }).join("");
-  const clean = textOut.replace(/```json|```/g,"").trim();
-  let parsed;
-  try { parsed = JSON.parse(clean); }
-  catch(e) {
-    console.error("Kon AI-antwoord niet parsen. stop_reason:", data.stop_reason, "ruwe tekst:", textOut);
-    if (data.stop_reason === "max_tokens") throw new Error("Antwoord van de AI was afgebroken (te lang) — probeer het opnieuw of vul handmatig in");
-    throw new Error("Kon de agenda niet automatisch interpreteren — vul handmatig in");
-  }
-  const dagenRaw = Array.isArray(parsed.dagen) ? parsed.dagen : [];
-  const dagen = dagenRaw.map(function(d){
-    return {
-      dag: d.dag,
-      patient: Math.round((Number(d.patient_uren)||0)*4)/4,
-      overigProductief: Math.round((Number(d.overig_productief_uren)||0)*4)/4,
-      nietProductief: Math.round((Number(d.niet_productief_uren)||0)*4)/4,
-      notitie: Math.round((Number(d.notitie_uren)||0)*4)/4,
-    };
-  });
-  const patientU = dagen.reduce((s,d)=>s+d.patient,0);
-  const overigProductiefU = dagen.reduce((s,d)=>s+d.overigProductief,0);
-  const nietProductiefU = dagen.reduce((s,d)=>s+d.nietProductief,0);
-  const notitieU = dagen.reduce((s,d)=>s+d.notitie,0);
-  return {
-    patient: Math.round(patientU*4)/4,
-    opmerking: parsed.opmerking || "",
-    breakdown: {
-      dagen,
-      patient: Math.round(patientU*4)/4,
-      overigProductief: Math.round(overigProductiefU*4)/4,
-      nietProductief: Math.round(nietProductiefU*4)/4,
-      notitiePending: Math.round(notitieU*4)/4,
+  if (headerIdx===-1) throw new Error("Kon de kolommen Datum/Tijdstip/Prestatiecode niet vinden in dit bestand");
+
+  const perDag = {}; DAG_NAMEN.forEach(d=>{ perDag[d]={patient:0,overig_productief:0,niet_productief:0,notitie:0}; });
+  const onbekend = {}; // code -> {label, uren}
+
+  for (let i=headerIdx+1;i<rows.length;i++){
+    const rij = rows[i];
+    if (!rij || !rij[col.datum]) continue;
+    const datumRuw = String(rij[col.datum]).trim();
+    const dagAfk = datumRuw.split(/\s+/)[0];
+    const dagNaam = dagAfkortingNaarNaam(dagAfk);
+    if (!dagNaam || !perDag[dagNaam]) continue; // sla weekend/onbekende dagen over
+
+    const {start,eind} = parseTijdstip(rij[col.tijd]);
+    const duur = Math.max(0, tijdNaarUren(eind)-tijdNaarUren(start));
+    if (duur<=0) continue;
+
+    const prestatieRuw = String(rij[col.prestatie]).trim();
+    const match = prestatieRuw.match(/^([A-Za-z0-9]+)\s*-\s*(.*)$/);
+    const code = match ? match[1].trim() : prestatieRuw;
+    const label = match ? match[2].trim() : "";
+
+    const cat = zoekCategorie(code);
+    if (!cat) {
+      onbekend[code] = onbekend[code] || {label, uren:0};
+      onbekend[code].uren = Math.round((onbekend[code].uren+duur)*4)/4;
+      continue;
     }
+    perDag[dagNaam][cat] = Math.round((perDag[dagNaam][cat]+duur)*4)/4;
+  }
+
+  const dagen = DAG_NAMEN.map(d=>({
+    dag: d,
+    patient: perDag[d].patient,
+    overigProductief: perDag[d].overig_productief,
+    nietProductief: perDag[d].niet_productief,
+    notitie: perDag[d].notitie,
+  }));
+  const patient = Math.round(dagen.reduce((s,d)=>s+d.patient,0)*4)/4;
+  const overigProductief = Math.round(dagen.reduce((s,d)=>s+d.overigProductief,0)*4)/4;
+  const nietProductief = Math.round(dagen.reduce((s,d)=>s+d.nietProductief,0)*4)/4;
+  const notitiePending = Math.round(dagen.reduce((s,d)=>s+d.notitie,0)*4)/4;
+
+  return {
+    patient,
+    breakdown: { dagen, patient, overigProductief, nietProductief, notitiePending, bron:"balielijst" },
+    onbekendeCodes: Object.keys(onbekend).map(code=>({code, ...onbekend[code]})),
   };
 }
+
 
 // ── SHARED STATE ─────────────────────────────────────────────────────
 const DataCtx = React.createContext({weeks:{}, collegas:DEFAULT_COLLEGAS, reload:()=>{}, syncStatus:"loading", syncMsg:""});
@@ -411,18 +404,20 @@ function InvoerTab({formData,setFormData}) {
 
   async function handleSave() { await persist(formData); }
 
-  async function handleScreenshot(c, file) {
+  async function handleBalielijst(c, file) {
     setAiState(p=>({...p,[c]:{status:"loading",msg:""}}));
     try {
-      const base64 = await fileToBase64(file);
-      const result = await analyzeAgendaScreenshot(base64, file.type);
+      const result = await parseBalielijstFile(file);
+      const gewerktTotaal = berekenGewerktUitDagen(getDagen(c, formData[c]));
+      const gecontroleerd = controleerBreakdown(result.breakdown, gewerktTotaal);
+      const opmerking = "";
       const updated = {...formData, [c]:{
         ...formData[c],
         patient:String(result.patient),
-        _ai:{ ...result.breakdown, opmerking:result.opmerking||"" }
+        _ai:{ ...gecontroleerd, opmerking, onbekendeCodes:result.onbekendeCodes }
       }};
       setFormData(updated);
-      setAiState(p=>({...p,[c]:{status:"ok",msg:""}}));
+      setAiState(p=>({...p,[c]:{status: result.onbekendeCodes.length ? "warn" : "ok", msg:""}}));
       setNpInput(p=>({...p,[c]:""}));
       await persist(updated);
     } catch(e) {
@@ -434,9 +429,11 @@ function InvoerTab({formData,setFormData}) {
     const extra = num(npInput[c]);
     const row = formData[c];
     if (!row._ai) return;
+    const bijgewerkt = {...row._ai, overigProductief: Math.round((row._ai.overigProductief+extra)*4)/4, notitiePending: Math.round((row._ai.notitiePending-extra)*4)/4};
+    const gewerktTotaal = berekenGewerktUitDagen(getDagen(c,row));
     const updated = {...formData, [c]:{
       ...row,
-      _ai: {...row._ai, overigProductief: Math.round((row._ai.overigProductief+extra)*4)/4, notitiePending:0}
+      _ai: controleerBreakdown(bijgewerkt, gewerktTotaal)
     }};
     setFormData(updated);
     await persist(updated);
@@ -469,7 +466,7 @@ function InvoerTab({formData,setFormData}) {
 
       <div style={{display:"flex",gap:8,alignItems:"flex-start",background:BRAND.bluePale,border:"1px solid "+BRAND.blueBorder,borderRadius:8,padding:"10px 14px",marginBottom:"0.9rem",fontSize:12,color:BRAND.blueDark}}>
         <span>📅</span>
-        <span>"Uren gewerkt" komt automatisch uit ieders basisrooster, met de vaste pauzeblokken (10:05-10:20, 12:25-13:00, 15:05-15:20, 17:25-18:00) er al automatisch afgetrokken. Klik op "dagen aanpassen" bij een collega om uitzonderingen door te geven (vrij, later begonnen, eerder gestopt). Upload eventueel ook een agenda-screenshot per collega — de AI vult dan "Uren patiëntcontact" in op basis van Fyzio Totaal's exacte kleurenlijst.</span>
+        <span>"Uren gewerkt" komt automatisch uit ieders basisrooster, met de vaste pauzeblokken (10:05-10:20, 12:25-13:00, 15:05-15:20, 17:25-18:00) er al automatisch afgetrokken. Klik op "dagen aanpassen" bij een collega om uitzonderingen door te geven (vrij, later begonnen, eerder gestopt). Voor "Uren patiëntcontact": upload per collega de balielijst-export uit Spotonmedics (.xlsx) — volledig automatisch en zonder AI verwerkt.</span>
       </div>
 
       <div className="tbl-wrap" style={{marginBottom:"1rem"}}>
@@ -492,15 +489,26 @@ function InvoerTab({formData,setFormData}) {
                 <tr style={{borderBottom:"0.5px solid "+BRAND.border}}>
                   <td style={{padding:"8px 10px",fontWeight:500,color:BRAND.text}}>{c}</td>
                   <td style={{textAlign:"center",padding:"6px 8px"}}>
-                    <input type="file" accept="image/*" id={"ss-"+c} style={{display:"none"}}
-                      onChange={e=>{ const f=e.target.files[0]; if(f) handleScreenshot(c,f); e.target.value=""; }}/>
-                    <button onClick={()=>document.getElementById("ss-"+c).click()} disabled={st.status==="loading"}
-                      title="Upload agenda-screenshot"
-                      style={{background:"transparent",border:"1px solid "+BRAND.blueBorder,borderRadius:6,padding:"5px 10px",fontSize:13,cursor:st.status==="loading"?"not-allowed":"pointer",color:BRAND.blueDark,fontFamily:"'Poppins',sans-serif"}}>
-                      {st.status==="loading"?"⏳":"📷"}
+                    <input type="file" accept=".xlsx,.xls,.csv" id={"bl-"+c} style={{display:"none"}}
+                      onChange={e=>{ const f=e.target.files[0]; if(f) handleBalielijst(c,f); e.target.value=""; }}/>
+                    <button onClick={()=>document.getElementById("bl-"+c).click()} disabled={st.status==="loading"}
+                      title="Upload balielijst-export (.xlsx)"
+                      style={{background:"transparent",border:"1px solid "+BRAND.purpleBorder,borderRadius:6,padding:"5px 10px",fontSize:13,cursor:st.status==="loading"?"not-allowed":"pointer",color:BRAND.purpleMid,fontFamily:"'Poppins',sans-serif"}}>
+                      {st.status==="loading"?"⏳":"📋"}
                     </button>
-                    {row._ai && st.status!=="loading" && <div style={{fontSize:10,color:BRAND.blueDark,marginTop:3}}>🤖 AI-ingevuld</div>}
+                    {row._ai && st.status!=="loading" && <div style={{fontSize:10,color:BRAND.blueDark,marginTop:3}}>📋 Balielijst-ingevuld</div>}
                     {st.status==="error" && <div style={{fontSize:10,color:BRAND.danger,marginTop:3,maxWidth:120}}>⚠ {st.msg}</div>}
+                    {row._ai && row._ai.onbekendeCodes && row._ai.onbekendeCodes.length>0 && (
+                      <div style={{fontSize:10,color:"#fff",marginTop:3,maxWidth:160,background:BRAND.warn,borderRadius:5,padding:"4px 6px",textAlign:"left"}}>
+                        ⚠ Onbekende code(s), NIET meegeteld:
+                        {row._ai.onbekendeCodes.map((o,i)=>(<div key={i}>• {o.code} — {o.label} ({o.uren}u)</div>))}
+                      </div>
+                    )}
+                    {row._ai && row._ai.klopt===false && (
+                      <div style={{fontSize:10,color:"#fff",marginTop:3,maxWidth:150,background:BRAND.danger,borderRadius:5,padding:"3px 6px",textAlign:"left"}}>
+                        ⚠ Optelsom klopt niet: {row._ai.som}u vs {String(gewerkt)}u gewerkt (verschil {row._ai.verschil>0?"+":""}{row._ai.verschil}u) — controleer handmatig
+                      </div>
+                    )}
                     {row._ai && row._ai.opmerking && <div style={{fontSize:10,color:BRAND.textMuted,marginTop:3,maxWidth:120}}>ℹ {row._ai.opmerking}</div>}
                     {(gewerkt>0 || row.patient!=="" || isAangepast) && (
                       <button onClick={()=>removeUpload(c)} title="Wis alle gegevens van deze collega voor deze week"
@@ -697,6 +705,18 @@ function CollegaTab() {
                   </table>
                   {r.ai ? (
                     <div style={{fontSize:12,color:BRAND.text,lineHeight:1.7}}>
+                      {r.ai.klopt===false && (
+                        <div style={{fontSize:12,color:"#fff",background:BRAND.danger,borderRadius:6,padding:"6px 8px",marginBottom:8}}>
+                          ⚠ Optelsom klopt niet: {r.ai.som}u (patiëntcontact+overig+niet-productief+notitie) vs {r.g}u gewerkt — verschil {r.ai.verschil>0?"+":""}{r.ai.verschil}u. Controleer en corrigeer handmatig in Invoer.
+                        </div>
+                      )}
+                      {r.ai.onbekendeCodes && r.ai.onbekendeCodes.length>0 && (
+                        <div style={{fontSize:12,color:"#fff",background:BRAND.warn,borderRadius:6,padding:"6px 8px",marginBottom:8}}>
+                          ⚠ Onbekende code(s), niet meegeteld in de uren hieronder:
+                          {r.ai.onbekendeCodes.map((o,i)=>(<div key={i}>• {o.code} — {o.label} ({o.uren}u)</div>))}
+                        </div>
+                      )}
+                      <div style={{fontSize:11,color:BRAND.textMuted,marginBottom:4}}>Bron: balielijst-export (Spotonmedics)</div>
                       {r.ai.opmerking && <div style={{fontSize:12,color:BRAND.textMuted,marginBottom:6}}>ℹ {r.ai.opmerking}</div>}
                       <div style={{fontWeight:600,marginBottom:2}}>Uit de agenda-screenshot (via kleurenlijst):</div>
                       <div>🩺 Patiëntcontact: <b>{r.ai.patient}u</b></div>
