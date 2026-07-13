@@ -192,23 +192,31 @@ function berekenDagUren(d) {
   let bruto = eindU-startU;
   let pauze = 0;
   PAUZE_SLOTS.forEach(function(slot){ pauze += overlapUren(startU,eindU,tijdNaarUren(slot[0]),tijdNaarUren(slot[1])); });
-  return Math.round(Math.max(0,bruto-pauze)*4)/4;
+  return Math.max(0,bruto-pauze); // exacte waarde, GEEN tussentijdse afronding
 }
 function berekenGewerktUitDagen(dagen) {
   if (!Array.isArray(dagen)) return 0;
-  return Math.round(dagen.reduce((s,d)=>s+berekenDagUren(d),0)*4)/4;
+  return Math.round(dagen.reduce((s,d)=>s+berekenDagUren(d),0)*100)/100; // afronden op 2 decimalen, pas op het totaal
 }
 
 // Controleert of patient + overigProductief + nietProductief + notitiePending exact optelt tot de
 // rooster-based gewerkte uren. Corrigeert NIETS automatisch — geeft alleen aan of en hoeveel het afwijkt,
 // zodat dit zichtbaar is en handmatig gecorrigeerd kan worden.
 function controleerBreakdown(breakdown, gewerktTotaal) {
-  const som = Math.round((breakdown.patient + breakdown.overigProductief + breakdown.nietProductief + breakdown.notitiePending)*4)/4;
-  const verschil = Math.round((som-gewerktTotaal)*4)/4;
-  return { ...breakdown, som, klopt: Math.abs(verschil)<0.26, verschil };
+  const som = Math.round((breakdown.patient + breakdown.overigProductief + breakdown.nietProductief + breakdown.notitiePending)*100)/100;
+  const verschil = Math.round((som-gewerktTotaal)*100)/100;
+  return { ...breakdown, som, klopt: Math.abs(verschil)<0.03, verschil };
 }
 function emptyRow() { return { dagen:null, patient:"", _ai:null }; }
 function emptyForm(collegas) { const f={}; collegas.forEach(c=>{f[c]=emptyRow();}); return f; }
+
+// Vaste MT-uren per week per collega — deze uren worden niet als aparte afspraak in Spotonmedics
+// geregistreerd, en dus ook niet in de balielijst-export gevonden. Vul hier de juiste waarden in
+// zodat ze automatisch bij "overig productief" worden opgeteld (en de optelsom weer klopt met "gewerkt").
+const MT_UREN_ROOSTER = {
+  "Lars": 7.9167, "Lonneke": 5.8333, "Jan Willem": 0, "Mayke": 0, "Laura": 0.8333,
+  "Nikita": 0, "Julia": 0, "Jesper": 0, "Thomas": 0, "Lynn": 0,
+};
 
 // ── BALIELIJST (Spotonmedics-export) — prestatiecode → categorie ─────
 // cat: "patient" (patiëntcontact), "overig_productief" (productief, geen patiëntcontact),
@@ -312,23 +320,23 @@ async function parseBalielijstFile(file) {
     const cat = zoekCategorie(code);
     if (!cat) {
       onbekend[code] = onbekend[code] || {label, uren:0};
-      onbekend[code].uren = Math.round((onbekend[code].uren+duur)*4)/4;
+      onbekend[code].uren = Math.round((onbekend[code].uren+duur)*100)/100;
       continue;
     }
-    perDag[dagNaam][cat] = Math.round((perDag[dagNaam][cat]+duur)*4)/4;
+    perDag[dagNaam][cat] = perDag[dagNaam][cat]+duur; // exacte optelling, geen tussentijdse afronding
   }
 
   const dagen = DAG_NAMEN.map(d=>({
     dag: d,
-    patient: perDag[d].patient,
-    overigProductief: perDag[d].overig_productief,
-    nietProductief: perDag[d].niet_productief,
-    notitie: perDag[d].notitie,
+    patient: Math.round(perDag[d].patient*100)/100,
+    overigProductief: Math.round(perDag[d].overig_productief*100)/100,
+    nietProductief: Math.round(perDag[d].niet_productief*100)/100,
+    notitie: Math.round(perDag[d].notitie*100)/100,
   }));
-  const patient = Math.round(dagen.reduce((s,d)=>s+d.patient,0)*4)/4;
-  const overigProductief = Math.round(dagen.reduce((s,d)=>s+d.overigProductief,0)*4)/4;
-  const nietProductief = Math.round(dagen.reduce((s,d)=>s+d.nietProductief,0)*4)/4;
-  const notitiePending = Math.round(dagen.reduce((s,d)=>s+d.notitie,0)*4)/4;
+  const patient = Math.round(DAG_NAMEN.reduce((s,d)=>s+perDag[d].patient,0)*100)/100;
+  const overigProductief = Math.round(DAG_NAMEN.reduce((s,d)=>s+perDag[d].overig_productief,0)*100)/100;
+  const nietProductief = Math.round(DAG_NAMEN.reduce((s,d)=>s+perDag[d].niet_productief,0)*100)/100;
+  const notitiePending = Math.round(DAG_NAMEN.reduce((s,d)=>s+perDag[d].notitie,0)*100)/100;
 
   return {
     patient,
@@ -421,12 +429,15 @@ function InvoerTab({formData,setFormData}) {
     setAiState(p=>({...p,[c]:{status:"loading",msg:""}}));
     try {
       const result = await parseBalielijstFile(file);
+      const mtUren = MT_UREN_ROOSTER[c] || 0;
+      const breakdownMetMt = { ...result.breakdown, overigProductief: Math.round((result.breakdown.overigProductief+mtUren)*100)/100 };
+      const patientMetMt = result.patient; // MT-uren zijn geen patiëntcontact, dus 'patient' blijft ongewijzigd
       const gewerktTotaal = berekenGewerktUitDagen(getDagen(c, formData[c]));
-      const gecontroleerd = controleerBreakdown(result.breakdown, gewerktTotaal);
-      const opmerking = "";
+      const gecontroleerd = controleerBreakdown(breakdownMetMt, gewerktTotaal);
+      const opmerking = mtUren>0 ? mtUren+"u vaste MT-uren automatisch meegeteld bij overig productief" : "";
       const updated = {...formData, [c]:{
         ...formData[c],
-        patient:String(result.patient),
+        patient:String(patientMetMt),
         _ai:{ ...gecontroleerd, opmerking, onbekendeCodes:result.onbekendeCodes }
       }};
       setFormData(updated);
@@ -442,7 +453,7 @@ function InvoerTab({formData,setFormData}) {
     const extra = num(npInput[c]);
     const row = formData[c];
     if (!row._ai) return;
-    const bijgewerkt = {...row._ai, overigProductief: Math.round((row._ai.overigProductief+extra)*4)/4, notitiePending: Math.round((row._ai.notitiePending-extra)*4)/4};
+    const bijgewerkt = {...row._ai, overigProductief: Math.round((row._ai.overigProductief+extra)*100)/100, notitiePending: Math.round((row._ai.notitiePending-extra)*100)/100};
     const gewerktTotaal = berekenGewerktUitDagen(getDagen(c,row));
     const updated = {...formData, [c]:{
       ...row,
@@ -485,7 +496,7 @@ function InvoerTab({formData,setFormData}) {
       <div className="tbl-wrap" style={{marginBottom:"1rem"}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
           <thead><tr style={{background:BRAND.purple}}>
-            {["Collega","Screenshot","Uren gewerkt","Uren patiëntcontact","Productiviteit"].map((h,i)=>(
+            {["Collega","Balielijst","Uren gewerkt","Uren patiëntcontact","Productiviteit"].map((h,i)=>(
               <th key={i} style={{textAlign:i===0?"left":"center",padding:"9px 10px",fontWeight:500,fontSize:12,color:"rgba(255,255,255,0.9)",whiteSpace:"nowrap"}}>{h}</th>
             ))}
           </tr></thead>
@@ -707,7 +718,7 @@ function CollegaTab() {
                           <td style={{padding:"3px 6px",textTransform:"capitalize"}}>{d.dag}</td>
                           <td style={{textAlign:"center",padding:"3px 6px"}}>{d.vrij?"— (vrij)":d.start}</td>
                           <td style={{textAlign:"center",padding:"3px 6px"}}>{d.vrij?"—":d.eind}</td>
-                          <td style={{textAlign:"right",padding:"3px 6px",fontWeight:600}}>{berekenDagUren(d)}u</td>
+                          <td style={{textAlign:"right",padding:"3px 6px",fontWeight:600}}>{Math.round(berekenDagUren(d)*100)/100}u</td>
                         </tr>
                       ))}
                       <tr style={{fontWeight:700}}>
@@ -731,14 +742,14 @@ function CollegaTab() {
                       )}
                       <div style={{fontSize:11,color:BRAND.textMuted,marginBottom:4}}>Bron: balielijst-export (Spotonmedics)</div>
                       {r.ai.opmerking && <div style={{fontSize:12,color:BRAND.textMuted,marginBottom:6}}>ℹ {r.ai.opmerking}</div>}
-                      <div style={{fontWeight:600,marginBottom:2}}>Uit de agenda-screenshot (via kleurenlijst):</div>
+                      <div style={{fontWeight:600,marginBottom:2}}>Uit de balielijst-export (via prestatiecodes):</div>
                       <div>🩺 Patiëntcontact: <b>{r.ai.patient}u</b></div>
                       <div>📋 Overig productief (MT-uren, vergadering): <b>{r.ai.overigProductief}u</b></div>
                       <div>💤 Niet-productief (aanwezig, geen waarde): <b>{r.ai.nietProductief}u</b></div>
                       {r.ai.notitiePending>0 && <div>🟠 Notitie-blokken (nog niet bevestigd): <b>{r.ai.notitiePending}u</b> — ga naar Invoer om te bevestigen</div>}
                     </div>
                   ) : (
-                    <div style={{fontSize:12,color:BRAND.textMuted}}>Patiëntcontact is handmatig ingevoerd voor deze week — geen screenshot-uitsplitsing beschikbaar.</div>
+                    <div style={{fontSize:12,color:BRAND.textMuted}}>Patiëntcontact is handmatig ingevoerd voor deze week — geen balielijst-uitsplitsing beschikbaar.</div>
                   )}
                 </div>
               )}
