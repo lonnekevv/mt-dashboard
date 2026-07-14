@@ -689,6 +689,12 @@ function InvoerTab({formData,setFormData}) {
                     <div style={{fontSize:9,color:BRAND.textMuted,marginTop:2}}>uur</div>
                   </div>
 
+                  <div>
+                    <div style={{fontSize:11,color:BRAND.textMuted,fontWeight:500,marginBottom:2}}>Productief geweest</div>
+                    <div style={{fontSize:18,fontWeight:700,color:BRAND.text}}>{productieveUren(row)}u</div>
+                    <div style={{fontSize:9,color:BRAND.textMuted,marginTop:2}}>pat. + overig + fyziotr.</div>
+                  </div>
+
                   <div style={{marginLeft:"auto",display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
                     <input type="file" accept=".xlsx,.xls,.csv" id={"bl-"+c} style={{display:"none"}}
                       onChange={e=>{ const f=e.target.files[0]; if(f) handleBalielijst(c,f); e.target.value=""; }}/>
@@ -831,12 +837,13 @@ function CollegaTab() {
         const g = berekenEffectiefGewerkt(dagen, r._ai);
         const pt = num(r.patient);
         if (g===0 && pt===0 && !r._ai) return null;
-        return { wk, g, pt, p: pct(g,productieveUren(r)), dagen, ai: r._ai || null };
+        return { wk, g, pt, prod:productieveUren(r), p: pct(g,productieveUren(r)), dagen, ai: r._ai || null };
       }).filter(Boolean);
   },[weeks,sel]);
 
   const avg = useMemo(()=>{
-    const valid = rows.filter(r=>r.p!=null);
+    const huidigeMaandag = getMondayStr(new Date());
+    const valid = rows.filter(r=>r.p!=null && r.wk<huidigeMaandag);
     if (!valid.length) return null;
     return Math.round((valid.reduce((s,r)=>s+r.p,0)/valid.length)*10)/10;
   },[rows]);
@@ -864,7 +871,7 @@ function CollegaTab() {
       {avg!=null && (
         <div style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderRadius:12,padding:"16px 18px",marginBottom:"1.25rem",borderTop:"3px solid "+pctColor(avg),textAlign:"center",maxWidth:220}}>
           <div style={{fontSize:36,fontWeight:700,color:pctColor(avg),lineHeight:1}}>{avg}%</div>
-          <div style={{fontSize:12,color:BRAND.textMuted,marginTop:4}}>Gemiddelde productiviteit ({rows.filter(r=>r.p!=null).length} weken)</div>
+          <div style={{fontSize:12,color:BRAND.textMuted,marginTop:4}}>Gemiddelde productiviteit ({rows.filter(r=>r.p!=null && r.wk<getMondayStr(new Date())).length} afgeronde weken, huidige week telt niet mee)</div>
         </div>
       )}
 
@@ -873,7 +880,7 @@ function CollegaTab() {
         ? <div style={{fontSize:13,color:BRAND.textMuted,padding:"1rem"}}>Nog geen gegevens ingevoerd voor {sel}.</div>
         : rows.map(r=>(
             <div key={r.wk} style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderRadius:10,padding:"12px 14px",marginBottom:10}}>
-              <ProdBar label={formatWeekLabel(r.wk)} p={r.p} sub={r.pt+"u patiëntcontact van "+r.g+"u gewerkt (volgens rooster)"} />
+              <ProdBar label={formatWeekLabel(r.wk)} p={r.p} sub={r.prod+"u productief geweest van "+r.g+"u gewerkt (volgens rooster)"} />
               <div style={{display:"flex",gap:14,marginTop:2}}>
                 <button onClick={()=>setExpanded(p=>({...p,[r.wk]:!p[r.wk]}))}
                   style={{background:"none",border:"none",color:BRAND.blueDark,fontSize:11,textDecoration:"underline",cursor:"pointer",padding:0,fontFamily:"'Poppins',sans-serif"}}>
@@ -996,7 +1003,7 @@ function TeamTab() {
       const r = weeks[wk][c] || emptyRow();
       const dagen = r.dagen || dagenDefault(c);
       const g = berekenEffectiefGewerkt(dagen, r._ai), pt = num(r.patient);
-      return { c, g, pt, p: pct(g,productieveUren(r)) };
+      return { c, g, pt, prod:productieveUren(r), p: pct(g,productieveUren(r)) };
     }).sort((a,b)=> (b.p??-1) - (a.p??-1));
   },[wk,weeks,collegas]);
 
@@ -1028,7 +1035,7 @@ function TeamTab() {
         {stats.length===0
           ? <div style={{fontSize:13,color:BRAND.textMuted}}>Nog geen data voor deze week.</div>
           : stats.map(s=>(
-              <ProdBar key={s.c} label={s.c} p={s.p} sub={s.pt+"u patiëntcontact van "+s.g+"u gewerkt"} />
+              <ProdBar key={s.c} label={s.c} p={s.p} sub={s.prod+"u productief geweest van "+s.g+"u gewerkt"} />
             ))
         }
       </div>
