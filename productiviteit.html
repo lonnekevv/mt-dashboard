@@ -118,64 +118,18 @@ let ROOSTER = {
 };
 const ROOSTER_DEFAULT = JSON.parse(JSON.stringify(ROOSTER));
 
-// Kleurenlegenda: exacte hexcodes → betekenis en categorie.
-// categorie: "patient" (patiëntcontact), "overig_productief" (productief maar geen patiëntcontact,
-// bijv. MT-uren/vergadering), "niet_productief" (aanwezig, telt niet mee), "notitie" (handmatig te bevestigen)
-// conditioneel: true = telt alleen mee als er ook echt "Patientafspraak"-tekst bij staat
-const COLOR_LEGEND = [
-  {hex:"#BDD3FF",label:"manuele therapie",cat:"patient"},
-  {hex:"#DEFFB8",label:"intake + echo",cat:"patient"},
-  {hex:"#FFFFFF",label:"reguliere zitting",cat:"patient",conditioneel:true},
-  {hex:"#BF60B3",label:"ZorgTopics behandeling",cat:"patient"},
-  {hex:"#AB7DBF",label:"FyzioFit uur",cat:"niet_productief"},
-  {hex:"#A15947",label:"FyzioFit patiënt",cat:"patient"},
-  {hex:"#5EFF9F",label:"intake",cat:"patient"},
-  {hex:"#DD97E8",label:"Exclufit",cat:"patient"},
-  {hex:"#B879AB",label:"Exclufit",cat:"patient"},
-  {hex:"#9F21FF",label:"Exclufit / supportgroep zorgplan / 1-1 training",cat:"patient"},
-  {hex:"#BCBF9D",label:"orofaciaal",cat:"patient"},
-  {hex:"#C5E6B3",label:"orofaciaal intake",cat:"patient"},
-  {hex:"#C1EBFA",label:"zaal patiënt",cat:"patient",conditioneel:true},
-  {hex:"#FFC526",label:"sportspreekuur",cat:"patient"},
-  {hex:"#FF7A7A",label:"sportspreekuur",cat:"niet_productief"},
-  {hex:"#A6B8FF",label:"strippenkaart",cat:"patient"},
-  {hex:"#F88FFF",label:"contactmoment",cat:"niet_productief"},
-  {hex:"#FFF5FE",label:"lange zitting",cat:"patient"},
-  {hex:"#E3A1FF",label:"supportgroep abbo",cat:"patient"},
-  {hex:"#1FE1FF",label:"performance training",cat:"patient",conditioneel:true},
-  {hex:"#448080",label:"huisbezoek",cat:"patient"},
-  {hex:"#FAFFB8",label:"echo",cat:"patient"},
-  {hex:"#C4ABFF",label:"testen VKB",cat:"patient"},
-  {hex:"#FFEBFB",label:"groepszitting",cat:"patient"},
-  {hex:"#FFC7B3",label:"shockwave",cat:"patient"},
-  {hex:"#0AFFFF",label:"MT-uren",cat:"overig_productief"},
-  {hex:"#4589FF",label:"vergadertijd",cat:"overig_productief"},
-  {hex:"#00BA1F",label:"zaaltraining",cat:"patient",conditioneel:true},
-  {hex:"#298DFF",label:"veldtraining",cat:"niet_productief"},
-  {hex:"#19C2FF",label:"veldtraining",cat:"patient"},
-  {hex:"#CE49E3",label:"performance analyse",cat:"patient"},
-  {hex:"#5C33FF",label:"performance test",cat:"patient"},
-  {hex:"#824DFF",label:"performance training (dinsdag)",cat:"patient",conditioneel:true},
-  {hex:"#FF1259",label:"afgemelde afspraak (tijdig of coulance)",cat:"niet_productief"},
-  {hex:"#719BAD",label:"agraves verwijderen",cat:"patient"},
-  {hex:"#FCFC47",label:"pauze",cat:"afwezig"},
-  {hex:"#DE2A48",label:"vakantie",cat:"afwezig"},
-  {hex:"#DEDEDE",label:"aansluitend/in overleg",cat:"niet_productief"},
-  {hex:"#B5B5B5",label:"afwezig",cat:"afwezig"},
-  {hex:"#FFA142",label:"notitie",cat:"notitie"},
-];
 
 // ── HELPERS ────────────────────────────────────────────────────────────
 function getMondayStr(d) { const day=d.getDay(),diff=d.getDate()-day+(day===0?-6:1); const m=new Date(d); m.setDate(diff); return m.toISOString().slice(0,10); }
 function formatWeekLabel(s) { const mon=new Date(s+"T00:00:00"),fri=new Date(mon); fri.setDate(mon.getDate()+4); return mon.getDate()+" – "+fri.toLocaleDateString("nl-NL",{day:"numeric",month:"long",year:"numeric"}); }
 function num(v) { const n=parseFloat(String(v).replace(",",".")); return isNaN(n)?0:n; }
 function pct(gewerkt, patient) { return gewerkt>0 ? Math.round((patient/gewerkt)*1000)/10 : null; }
-// Productiviteit% is gebaseerd op ALLE productieve tijd: patiëntcontact + overig productief (MT-uren/vergadering)
-// + fyziotraining — niet alleen pure patiëntcontact. Niet-productief en notitie tellen niet mee.
+// Totale productiviteit% is gebaseerd op: (gedraaide zittingen + productieve extra uren) / gewerkt.
+// Zonder balielijst-uitsplitsing (_ai) valt dit terug op de simpele verhouding patiëntcontact/gewerkt.
 function productieveUren(row) {
   const basis = num(row.patient);
   if (!row._ai) return basis;
-  return Math.round((basis + (row._ai.overigProductief||0) + (row._ai.fyziotraining||0))*100)/100;
+  return Math.round((berekenGedraaid(row._ai) + berekenProductieveExtra(row._ai))*100)/100;
 }
 function pctColor(p) {
   if (p==null) return BRAND.textMuted;
@@ -215,13 +169,46 @@ function berekenEffectiefGewerkt(dagen, ai) {
   return Math.round((berekenGewerktUitDagen(dagen) + ((ai && ai.pauzeCorrectieTotaal) || 0))*100)/100;
 }
 
-// Controleert of patient + overigProductief + nietProductief + notitiePending exact optelt tot de
+// Controleert of alle categorieën samen exact optellen tot de rooster-based gewerkte uren.
 // rooster-based gewerkte uren. Corrigeert NIETS automatisch — geeft alleen aan of en hoeveel het afwijkt,
 // zodat dit zichtbaar is en handmatig gecorrigeerd kan worden.
 function controleerBreakdown(breakdown, gewerktTotaal) {
-  const som = Math.round((breakdown.patient + (breakdown.fyziotraining||0) + breakdown.overigProductief + breakdown.nietProductief + breakdown.notitiePending)*100)/100;
+  const som = Math.round((
+    breakdown.patient + (breakdown.fyziotraining||0) + (breakdown.fyziofit||0) +
+    (breakdown.vergaderingBinnenPauze||0) + (breakdown.vergaderingBuitenPauze||0) +
+    (breakdown.mtUren||0) + breakdown.nietProductief + breakdown.notitiePending
+  )*100)/100;
   const verschil = Math.round((som-gewerktTotaal)*100)/100;
   return { ...breakdown, som, klopt: Math.abs(verschil)<0.03, verschil };
+}
+
+const VARIABEL_SALARIS = ["Jan Willem","Laura"];
+
+// Afgeleide productiviteitsmetrics volgens het Fyzio Totaal-model:
+// declarabel = alle beschikbare reguliere-behandelcapaciteit (excl. groepstraining/fyziofit en MT-uren)
+// productieveExtra = fyziotraining + fyziofit (groepsmomenten)
+// nietDeclarabel = MT-uren + vergadertijd die een officieel pauzeslot overlapt
+// gedraaid = daadwerkelijk gedraaide patiëntcontact-tijd (incl. bevestigde notitie-uren)
+function berekenDeclarabel(ai) {
+  if (!ai) return null;
+  return Math.round((ai.patient + (ai.vergaderingBuitenPauze||0) + ai.nietProductief + ai.notitiePending)*100)/100;
+}
+function berekenProductieveExtra(ai) {
+  if (!ai) return null;
+  return Math.round(((ai.fyziotraining||0) + (ai.fyziofit||0))*100)/100;
+}
+function berekenNietDeclarabel(ai) {
+  if (!ai) return null;
+  return Math.round(((ai.mtUren||0) + (ai.vergaderingBinnenPauze||0))*100)/100;
+}
+function berekenGedraaid(ai) {
+  if (!ai) return null;
+  return ai.patient; // 'patient' bevat na bevestiging ook het productieve deel van notitie-uren
+}
+function pctDeclarabel(ai) {
+  if (!ai) return null;
+  const decl = berekenDeclarabel(ai), gedraaid = berekenGedraaid(ai);
+  return decl>0 ? Math.round((gedraaid/decl)*1000)/10 : null;
 }
 function emptyRow() { return { dagen:null, patient:"", _ai:null }; }
 function emptyForm(collegas) { const f={}; collegas.forEach(c=>{f[c]=emptyRow();}); return f; }
@@ -244,14 +231,14 @@ const MT_UREN_ROOSTER_DEFAULT = {
 let MT_UREN_ROOSTER = JSON.parse(JSON.stringify(MT_UREN_ROOSTER_DEFAULT));
 
 // ── BALIELIJST (Spotonmedics-export) — prestatiecode → categorie ─────
-// cat: "patient" (patiëntcontact), "overig_productief" (productief, geen patiëntcontact),
-// "niet_productief" (aanwezig, telt niet mee), "notitie" (handmatig te bevestigen, zoals NOT)
+// cat: "patient" (declarabele patiëntcontact), "fyziotraining"/"fyziofit" (productieve extra uren),
+// "vergadering" (VERG, wordt verderop gesplitst obv pauze-overlap), "niet_productief" (aanwezig,
+// telt niet mee als gedraaid maar wel als declarabele capaciteit), "notitie" (handmatig te bevestigen)
 const CODE_LEGEND = {};
 (function(){
   const patient = [
     "010001","010002","010003","010006","010011","010012","010014","010015","010016","010017","010018", // Exclufit
     "1000", // reguliere zitting
-    "10007","10008","10009", // fyziofit
     "1001", // uitbehandeling
     "1064", // intake coulance
     "120","121","123","124", // echo/shockwave/strippenkaart/agraves
@@ -268,12 +255,14 @@ const CODE_LEGEND = {};
     "777","7773", // orofaciaal
     "996", // sportspreekuur
   ];
-  const fyziotraining = ["1314","1316"]; // groepszitting Fyziotraining — eigen categorie, geen patiëntcontact
+  const fyziotraining = ["1314","1316"]; // groepszitting Fyziotraining
+  const fyziofit = ["10007","10008","10009"]; // FysioFit-uren
   const nietProductief = ["1960","1961","1962","998"];
   patient.forEach(c=>{ CODE_LEGEND[c]="patient"; });
   fyziotraining.forEach(c=>{ CODE_LEGEND[c]="fyziotraining"; });
+  fyziofit.forEach(c=>{ CODE_LEGEND[c]="fyziofit"; });
   nietProductief.forEach(c=>{ CODE_LEGEND[c]="niet_productief"; });
-  CODE_LEGEND["VERG"]="overig_productief";
+  CODE_LEGEND["VERG"]="vergadering";
   CODE_LEGEND["NOT"]="notitie";
 })();
 function zoekCategorie(code) {
@@ -331,7 +320,7 @@ async function parseBalielijstFile(file, dagenRooster, mtRooster) {
   DAG_NAMEN.forEach((d,i)=>{ roosterPerDag[d] = (dagenRooster && dagenRooster[i]) || {vrij:true}; });
 
   const perDag = {}; const dagIntervals = {}; const pauzeDoorgewerkt = {};
-  DAG_NAMEN.forEach(d=>{ perDag[d]={patient:0,fyziotraining:0,overig_productief:0,niet_productief:0,notitie:0}; dagIntervals[d]=[]; pauzeDoorgewerkt[d]=0; });
+  DAG_NAMEN.forEach(d=>{ perDag[d]={patient:0,fyziotraining:0,fyziofit:0,vergaderingBinnenPauze:0,vergaderingBuitenPauze:0,niet_productief:0,notitie:0}; dagIntervals[d]=[]; pauzeDoorgewerkt[d]=0; });
   const onbekend = {}; // code -> {label, uren}
 
   for (let i=headerIdx+1;i<rows.length;i++){
@@ -364,13 +353,21 @@ async function parseBalielijstFile(file, dagenRooster, mtRooster) {
       onbekend[code].uren = Math.round((onbekend[code].uren+duur)*100)/100;
       continue;
     }
-    perDag[dagNaam][cat] = perDag[dagNaam][cat]+duur; // exacte optelling, geen tussentijdse afronding
+    const clipStart = Math.max(s,roosterStart), clipEind = Math.min(e,roosterEind);
+    let pauzeOverlapDeze = 0;
+    PAUZE_SLOTS.forEach(function(p){ pauzeOverlapDeze += overlapUren(clipStart,clipEind, tijdNaarUren(p[0]),tijdNaarUren(p[1])); });
+
+    if (cat==="vergadering") {
+      // Vergadertijd die een officieel pauzeslot overlapt telt als niet-declarabel; de rest als declarabel.
+      perDag[dagNaam].vergaderingBinnenPauze += pauzeOverlapDeze;
+      perDag[dagNaam].vergaderingBuitenPauze += (duur-pauzeOverlapDeze);
+    } else {
+      perDag[dagNaam][cat] = perDag[dagNaam][cat]+duur; // exacte optelling, geen tussentijdse afronding
+    }
     // Overlapt deze regel met een officieel pauzeslot? Dan is die pauze feitelijk doorgewerkt —
     // die tijd moet bij "gewerkt" opgeteld worden (want die wordt normaliter afgetrokken).
-    PAUZE_SLOTS.forEach(function(p){
-      pauzeDoorgewerkt[dagNaam] += overlapUren(Math.max(s,roosterStart),Math.min(e,roosterEind), tijdNaarUren(p[0]),tijdNaarUren(p[1]));
-    });
-    dagIntervals[dagNaam].push([Math.max(s,roosterStart), Math.min(e,roosterEind)]);
+    pauzeDoorgewerkt[dagNaam] += pauzeOverlapDeze;
+    dagIntervals[dagNaam].push([clipStart, clipEind]);
   }
 
   // Overlap-surplus: als er meerdere afspraken op hetzelfde moment gepland staan (bijv. 2 patiënten in
@@ -393,8 +390,9 @@ async function parseBalielijstFile(file, dagenRooster, mtRooster) {
 
   // MT-uren-vensters (indien opgegeven): vullen alleen het deel van het venster dat nog niet door een
   // echte balielijst-regel of pauze is gedekt (voorkomt dubbeltelling), en tellen dat restdeel op bij
-  // overig productief. Het hele venster wordt daarna als 'gedekt' beschouwd voor de gat-detectie verderop.
+  // MT-uren (niet-declarabel). Het hele venster wordt daarna als 'gedekt' beschouwd voor de gat-detectie.
   let mtTotaalToegevoegd = 0;
+  const mtUren = {}; DAG_NAMEN.forEach(d=>{ mtUren[d]=0; });
   DAG_NAMEN.forEach((d,i)=>{
     const mt = mtRooster && mtRooster[i];
     const rooster = roosterPerDag[d];
@@ -415,7 +413,7 @@ async function parseBalielijstFile(file, dagenRooster, mtRooster) {
     merged.forEach(([s,e])=>{ if (s>cursor) restMt+=(s-cursor); cursor=Math.max(cursor,e); });
     if (mtEind>cursor) restMt += (mtEind-cursor);
 
-    perDag[d].overig_productief += restMt;
+    mtUren[d] += restMt;
     mtTotaalToegevoegd += restMt;
     dagIntervals[d].push([mtStart, mtEind]); // hele venster telt nu als gedekt voor de gat-detectie
   });
@@ -443,7 +441,10 @@ async function parseBalielijstFile(file, dagenRooster, mtRooster) {
     dag: d,
     patient: Math.round(perDag[d].patient*100)/100,
     fyziotraining: Math.round(perDag[d].fyziotraining*100)/100,
-    overigProductief: Math.round(perDag[d].overig_productief*100)/100,
+    fyziofit: Math.round(perDag[d].fyziofit*100)/100,
+    vergaderingBinnenPauze: Math.round(perDag[d].vergaderingBinnenPauze*100)/100,
+    vergaderingBuitenPauze: Math.round(perDag[d].vergaderingBuitenPauze*100)/100,
+    mtUren: Math.round(mtUren[d]*100)/100,
     nietProductief: Math.round(perDag[d].niet_productief*100)/100,
     notitie: Math.round(perDag[d].notitie*100)/100,
     pauzeDoorgewerkt: Math.round(pauzeDoorgewerkt[d]*100)/100,
@@ -452,15 +453,27 @@ async function parseBalielijstFile(file, dagenRooster, mtRooster) {
   const overlapSurplusTotaal = Math.round(DAG_NAMEN.reduce((s,d)=>s+overlapSurplus[d],0)*100)/100;
   const patient = Math.round(DAG_NAMEN.reduce((s,d)=>s+perDag[d].patient,0)*100)/100;
   const fyziotrainingTotaal = Math.round(DAG_NAMEN.reduce((s,d)=>s+perDag[d].fyziotraining,0)*100)/100;
-  const overigProductief = Math.round(DAG_NAMEN.reduce((s,d)=>s+perDag[d].overig_productief,0)*100)/100;
+  const fyziofitTotaal = Math.round(DAG_NAMEN.reduce((s,d)=>s+perDag[d].fyziofit,0)*100)/100;
+  const vergaderingBinnenPauzeTotaal = Math.round(DAG_NAMEN.reduce((s,d)=>s+perDag[d].vergaderingBinnenPauze,0)*100)/100;
+  const vergaderingBuitenPauzeTotaal = Math.round(DAG_NAMEN.reduce((s,d)=>s+perDag[d].vergaderingBuitenPauze,0)*100)/100;
+  const mtUrenTotaal = Math.round(mtTotaalToegevoegd*100)/100;
   const nietProductief = Math.round(DAG_NAMEN.reduce((s,d)=>s+perDag[d].niet_productief,0)*100)/100;
   const notitiePending = Math.round(DAG_NAMEN.reduce((s,d)=>s+perDag[d].notitie,0)*100)/100;
 
   return {
     patient,
-    breakdown: { dagen, patient, fyziotraining:fyziotrainingTotaal, overigProductief, nietProductief, notitiePending, bron:"balielijst" },
+    breakdown: {
+      dagen, patient,
+      fyziotraining: fyziotrainingTotaal,
+      fyziofit: fyziofitTotaal,
+      vergaderingBinnenPauze: vergaderingBinnenPauzeTotaal,
+      vergaderingBuitenPauze: vergaderingBuitenPauzeTotaal,
+      mtUren: mtUrenTotaal,
+      nietProductief, notitiePending,
+      bron:"balielijst",
+    },
     onbekendeCodes: Object.keys(onbekend).map(code=>({code, ...onbekend[code]})),
-    mtUrenToegevoegd: Math.round(mtTotaalToegevoegd*100)/100,
+    mtUrenToegevoegd: mtUrenTotaal,
     pauzeCorrectieTotaal,
     overlapSurplusTotaal,
   };
@@ -596,15 +609,17 @@ function InvoerTab({formData,setFormData}) {
     const row = formData[c];
     if (!row._ai) return;
     const rest = Math.max(0, Math.round((row._ai.notitiePending-extra)*100)/100);
+    const nieuwPatient = Math.round((row._ai.patient+extra)*100)/100;
     const bijgewerkt = {
       ...row._ai,
-      overigProductief: Math.round((row._ai.overigProductief+extra)*100)/100,
+      patient: nieuwPatient,
       nietProductief: Math.round((row._ai.nietProductief+rest)*100)/100,
       notitiePending: 0,
     };
     const gewerktTotaal = berekenGewerktUitDagen(getDagen(c,row));
     const updated = {...formData, [c]:{
       ...row,
+      patient: String(nieuwPatient),
       _ai: controleerBreakdown(bijgewerkt, gewerktTotaal)
     }};
     setFormData(updated);
@@ -649,6 +664,7 @@ function InvoerTab({formData,setFormData}) {
           const mtRooster = getMtRooster(c,row);
           const gewerkt = berekenEffectiefGewerkt(dagen, row._ai);
           const p = pct(gewerkt, productieveUren(row));
+          const pDecl = row._ai ? pctDeclarabel(row._ai) : null;
           const st = aiState[c] || {status:"idle",msg:""};
           const isAangepast = !!row.dagen;
           const mtAangepast = !!row._mtOverride;
@@ -657,10 +673,21 @@ function InvoerTab({formData,setFormData}) {
           return (
             <div key={c} style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderRadius:14,overflow:"hidden",borderLeft:"4px solid "+pctColor(p)}}>
 
-              {/* Header: naam + productiviteit */}
+              {/* Header: naam + beide productiviteitspercentages */}
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:BRAND.purplePale,borderBottom:"1px solid "+BRAND.border}}>
                 <span style={{fontSize:14,fontWeight:600,color:BRAND.text}}>{c}</span>
-                <span style={{fontSize:20,fontWeight:700,color:pctColor(p)}}>{p==null?"—":p+"%"}</span>
+                <div style={{display:"flex",gap:16,alignItems:"center"}}>
+                  {pDecl!=null && (
+                    <div style={{textAlign:"right"}}>
+                      <div style={{fontSize:9,color:BRAND.textMuted,lineHeight:1}}>declarabel</div>
+                      <div style={{fontSize:15,fontWeight:600,color:pctColor(pDecl)}}>{pDecl}%</div>
+                    </div>
+                  )}
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontSize:9,color:BRAND.textMuted,lineHeight:1}}>totaal</div>
+                    <span style={{fontSize:20,fontWeight:700,color:pctColor(p)}}>{p==null?"—":p+"%"}</span>
+                  </div>
+                </div>
               </div>
 
               <div style={{padding:"14px 16px"}}>
@@ -689,11 +716,20 @@ function InvoerTab({formData,setFormData}) {
                     <div style={{fontSize:9,color:BRAND.textMuted,marginTop:2}}>uur</div>
                   </div>
 
-                  <div>
-                    <div style={{fontSize:11,color:BRAND.textMuted,fontWeight:500,marginBottom:2}}>Productief geweest</div>
-                    <div style={{fontSize:18,fontWeight:700,color:BRAND.text}}>{productieveUren(row)}u</div>
-                    <div style={{fontSize:9,color:BRAND.textMuted,marginTop:2}}>pat. + overig + fyziotr.</div>
-                  </div>
+                  {row._ai && (
+                    <>
+                      <div>
+                        <div style={{fontSize:11,color:BRAND.textMuted,fontWeight:500,marginBottom:2}}>Declarabel</div>
+                        <div style={{fontSize:18,fontWeight:700,color:BRAND.text}}>{berekenDeclarabel(row._ai)}u</div>
+                        <div style={{fontSize:9,color:BRAND.textMuted,marginTop:2}}>beschikbare capaciteit</div>
+                      </div>
+                      <div>
+                        <div style={{fontSize:11,color:BRAND.textMuted,fontWeight:500,marginBottom:2}}>Productieve extra</div>
+                        <div style={{fontSize:18,fontWeight:700,color:BRAND.text}}>{berekenProductieveExtra(row._ai)}u</div>
+                        <div style={{fontSize:9,color:BRAND.textMuted,marginTop:2}}>fyziotr. + fyziofit</div>
+                      </div>
+                    </>
+                  )}
 
                   <div style={{marginLeft:"auto",display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
                     <input type="file" accept=".xlsx,.xls,.csv" id={"bl-"+c} style={{display:"none"}}
@@ -920,7 +956,7 @@ function CollegaTab() {
                     <div style={{fontSize:12,color:BRAND.text,lineHeight:1.7}}>
                       {r.ai.klopt===false && (
                         <div style={{fontSize:12,color:"#fff",background:BRAND.danger,borderRadius:6,padding:"6px 8px",marginBottom:8}}>
-                          ⚠ Optelsom klopt niet: {r.ai.som}u (patiëntcontact+overig+niet-productief+notitie) vs {r.g}u gewerkt — verschil {r.ai.verschil>0?"+":""}{r.ai.verschil}u. Controleer en corrigeer handmatig in Invoer.
+                          ⚠ Optelsom klopt niet: {r.ai.som}u (patiënt+fyziotraining+fyziofit+vergadering+MT-uren+niet-productief+notitie) vs {r.g}u gewerkt — verschil {r.ai.verschil>0?"+":""}{r.ai.verschil}u. Controleer en corrigeer handmatig in Invoer.
                         </div>
                       )}
                       {r.ai.onbekendeCodes && r.ai.onbekendeCodes.length>0 && (
@@ -933,50 +969,60 @@ function CollegaTab() {
                       {r.ai.opmerking && <div style={{fontSize:12,color:BRAND.textMuted,marginBottom:6}}>ℹ {r.ai.opmerking}</div>}
 
                       <div style={{fontWeight:600,marginBottom:4}}>Per dag, uit de balielijst-export (gaten in de agenda tellen automatisch mee als niet-productief):</div>
-                      <table style={{fontSize:11,borderCollapse:"collapse",width:"100%",marginBottom:10}}>
+                      <table style={{fontSize:10.5,borderCollapse:"collapse",width:"100%",marginBottom:10}}>
                         <thead><tr style={{color:BRAND.textMuted,borderBottom:"1px solid "+BRAND.border}}>
-                          <th style={{textAlign:"left",padding:"3px 5px"}}>Dag</th>
-                          <th style={{textAlign:"right",padding:"3px 5px"}}>🩺 Patiënt</th>
-                          <th style={{textAlign:"right",padding:"3px 5px"}}>🤸 Fyziotr.</th>
-                          <th style={{textAlign:"right",padding:"3px 5px"}}>📋 Overig</th>
-                          <th style={{textAlign:"right",padding:"3px 5px"}}>💤 Niet-prod.</th>
-                          <th style={{textAlign:"right",padding:"3px 5px"}}>🟠 Notitie</th>
-                          <th style={{textAlign:"right",padding:"3px 5px",fontWeight:700}}>Rooster</th>
+                          <th style={{textAlign:"left",padding:"3px 4px"}}>Dag</th>
+                          <th style={{textAlign:"right",padding:"3px 4px"}}>🩺 Pat.</th>
+                          <th style={{textAlign:"right",padding:"3px 4px"}}>🤸 Fyziotr.</th>
+                          <th style={{textAlign:"right",padding:"3px 4px"}}>🏋️ Fyziofit</th>
+                          <th style={{textAlign:"right",padding:"3px 4px"}}>👥 Verg. (decl.)</th>
+                          <th style={{textAlign:"right",padding:"3px 4px"}}>👥 Verg. (pauze)</th>
+                          <th style={{textAlign:"right",padding:"3px 4px"}}>🗓️ MT-uren</th>
+                          <th style={{textAlign:"right",padding:"3px 4px"}}>💤 Niet-prod.</th>
+                          <th style={{textAlign:"right",padding:"3px 4px"}}>🟠 Notitie</th>
+                          <th style={{textAlign:"right",padding:"3px 4px",fontWeight:700}}>Rooster</th>
                         </tr></thead>
                         <tbody>
                           {r.ai.dagen.map((d,i)=>(
                             <tr key={i} style={{borderBottom:"0.5px solid "+BRAND.border}}>
-                              <td style={{padding:"3px 5px",textTransform:"capitalize"}}>{d.dag}</td>
-                              <td style={{textAlign:"right",padding:"3px 5px"}}>{d.patient}u</td>
-                              <td style={{textAlign:"right",padding:"3px 5px"}}>{d.fyziotraining||0}u</td>
-                              <td style={{textAlign:"right",padding:"3px 5px"}}>{d.overigProductief}u</td>
-                              <td style={{textAlign:"right",padding:"3px 5px"}}>{d.nietProductief}u</td>
-                              <td style={{textAlign:"right",padding:"3px 5px"}}>{d.notitie}u</td>
-                              <td style={{textAlign:"right",padding:"3px 5px",fontWeight:700}}>{Math.round(berekenDagUren(r.dagen[i])*100)/100}u</td>
+                              <td style={{padding:"3px 4px",textTransform:"capitalize"}}>{d.dag}</td>
+                              <td style={{textAlign:"right",padding:"3px 4px"}}>{d.patient}u</td>
+                              <td style={{textAlign:"right",padding:"3px 4px"}}>{d.fyziotraining||0}u</td>
+                              <td style={{textAlign:"right",padding:"3px 4px"}}>{d.fyziofit||0}u</td>
+                              <td style={{textAlign:"right",padding:"3px 4px"}}>{d.vergaderingBuitenPauze||0}u</td>
+                              <td style={{textAlign:"right",padding:"3px 4px"}}>{d.vergaderingBinnenPauze||0}u</td>
+                              <td style={{textAlign:"right",padding:"3px 4px"}}>{d.mtUren||0}u</td>
+                              <td style={{textAlign:"right",padding:"3px 4px"}}>{d.nietProductief}u</td>
+                              <td style={{textAlign:"right",padding:"3px 4px"}}>{d.notitie}u</td>
+                              <td style={{textAlign:"right",padding:"3px 4px",fontWeight:700}}>{Math.round(berekenDagUren(r.dagen[i])*100)/100}u</td>
                             </tr>
                           ))}
                         </tbody>
                         <tfoot>
                           <tr style={{fontWeight:700,borderTop:"1px solid "+BRAND.border}}>
-                            <td style={{padding:"5px 5px",textAlign:"left"}}>Totaal geteld</td>
-                            <td style={{textAlign:"right",padding:"5px 5px"}}>{r.ai.patient}u</td>
-                            <td style={{textAlign:"right",padding:"5px 5px"}}>{r.ai.fyziotraining||0}u</td>
-                            <td style={{textAlign:"right",padding:"5px 5px"}}>{r.ai.overigProductief}u</td>
-                            <td style={{textAlign:"right",padding:"5px 5px"}}>{r.ai.nietProductief}u</td>
-                            <td style={{textAlign:"right",padding:"5px 5px"}}>{r.ai.notitiePending}u</td>
-                            <td style={{textAlign:"right",padding:"5px 5px",color:BRAND.blueDark}}>{r.ai.som}u</td>
+                            <td style={{padding:"5px 4px",textAlign:"left"}}>Totaal</td>
+                            <td style={{textAlign:"right",padding:"5px 4px"}}>{r.ai.patient}u</td>
+                            <td style={{textAlign:"right",padding:"5px 4px"}}>{r.ai.fyziotraining||0}u</td>
+                            <td style={{textAlign:"right",padding:"5px 4px"}}>{r.ai.fyziofit||0}u</td>
+                            <td style={{textAlign:"right",padding:"5px 4px"}}>{r.ai.vergaderingBuitenPauze||0}u</td>
+                            <td style={{textAlign:"right",padding:"5px 4px"}}>{r.ai.vergaderingBinnenPauze||0}u</td>
+                            <td style={{textAlign:"right",padding:"5px 4px"}}>{r.ai.mtUren||0}u</td>
+                            <td style={{textAlign:"right",padding:"5px 4px"}}>{r.ai.nietProductief}u</td>
+                            <td style={{textAlign:"right",padding:"5px 4px"}}>{r.ai.notitiePending}u</td>
+                            <td style={{textAlign:"right",padding:"5px 4px",color:BRAND.blueDark}}>{r.ai.som}u</td>
                           </tr>
                         </tfoot>
                       </table>
                       <div style={{fontSize:11,color:BRAND.textMuted,marginBottom:10}}>De rechteronderste waarde ({r.ai.som}u) is de som van alle geteld categorieën — vergelijk dit met "Totaal gewerkt" hierboven ({r.g}u) om te zien of (en hoeveel) ze afwijken.</div>
 
-                      <div style={{fontWeight:600,marginBottom:2}}>Weektotalen:</div>
-                      <div>🩺 Patiëntcontact: <b>{r.ai.patient}u</b></div>
-                      <div>🤸 Fyziotraining (groepszitting): <b>{r.ai.fyziotraining||0}u</b></div>
-                      <div>📋 Overig productief (MT-uren, vergadering): <b>{r.ai.overigProductief}u</b></div>
-                      <div>💤 Niet-productief (aanwezig, geen patiënt/gat in agenda): <b>{r.ai.nietProductief}u</b></div>
-                      {r.ai.notitiePending>0 && <div>🟠 Notitie-blokken binnen werktijd (nog niet bevestigd): <b>{r.ai.notitiePending}u</b> — ga naar Invoer om te bevestigen</div>}
-                      {(r.ai.ongelogd||0)>0 && <div>❓ Niet in Spotonmedics gelogd (bijv. wachttijd tussen afspraken): <b>{r.ai.ongelogd}u</b></div>}
+                      <div style={{fontWeight:600,marginBottom:2}}>Afgeleide productiviteitscijfers:</div>
+                      <div>📐 Declarabel (beschikbare capaciteit): <b>{berekenDeclarabel(r.ai)}u</b></div>
+                      <div>🤸 Productieve extra uren (fyziotr. + fyziofit): <b>{berekenProductieveExtra(r.ai)}u</b></div>
+                      <div>🚫 Niet declarabel (MT-uren + verg. in pauze): <b>{berekenNietDeclarabel(r.ai)}u</b></div>
+                      <div>✅ Gedraaide zittingen: <b>{berekenGedraaid(r.ai)}u</b></div>
+                      <div style={{marginTop:6}}>📊 Productiviteit declarabel: <b style={{color:pctColor(pctDeclarabel(r.ai))}}>{pctDeclarabel(r.ai)}%</b> (gedraaid / declarabel)</div>
+                      <div>📊 Totale productiviteit: <b style={{color:pctColor(r.p)}}>{r.p}%</b> (gedraaid + productieve extra / gewerkt)</div>
+                      {r.ai.notitiePending>0 && <div style={{marginTop:6}}>🟠 Notitie-blokken binnen werktijd (nog niet bevestigd): <b>{r.ai.notitiePending}u</b> — ga naar Invoer om te bevestigen</div>}
                     </div>
                   ) : (
                     <div style={{fontSize:12,color:BRAND.textMuted}}>Patiëntcontact is handmatig ingevoerd voor deze week — geen balielijst-uitsplitsing beschikbaar.</div>
@@ -1002,8 +1048,16 @@ function TeamTab() {
     return collegas.map(c=>{
       const r = weeks[wk][c] || emptyRow();
       const dagen = r.dagen || dagenDefault(c);
-      const g = berekenEffectiefGewerkt(dagen, r._ai), pt = num(r.patient);
-      return { c, g, pt, prod:productieveUren(r), p: pct(g,productieveUren(r)) };
+      const g = berekenEffectiefGewerkt(dagen, r._ai);
+      const ai = r._ai || null;
+      const declarabel = ai ? berekenDeclarabel(ai) : null;
+      const gedraaid = ai ? berekenGedraaid(ai) : null;
+      return {
+        c, g, ai, declarabel, gedraaid,
+        prod: productieveUren(r),
+        p: pct(g,productieveUren(r)),
+        pDecl: ai ? pctDeclarabel(ai) : null,
+      };
     }).sort((a,b)=> (b.p??-1) - (a.p??-1));
   },[wk,weeks,collegas]);
 
@@ -1012,6 +1066,20 @@ function TeamTab() {
     if (!valid.length) return null;
     return Math.round((valid.reduce((s,x)=>s+x.p,0)/valid.length)*10)/10;
   },[stats]);
+
+  function pctDeclarabelGroep(namen) {
+    const groep = stats.filter(s=>namen.includes(s.c) && s.declarabel!=null);
+    if (!groep.length) return null;
+    const sumGedraaid = groep.reduce((s,x)=>s+x.gedraaid,0);
+    const sumDeclarabel = groep.reduce((s,x)=>s+x.declarabel,0);
+    return sumDeclarabel>0 ? Math.round((sumGedraaid/sumDeclarabel)*1000)/10 : null;
+  }
+
+  const alleNamen = collegas;
+  const vastNamen = collegas.filter(c=>!VARIABEL_SALARIS.includes(c));
+  const pctAlle = pctDeclarabelGroep(alleNamen);
+  const pctVariabel = pctDeclarabelGroep(VARIABEL_SALARIS);
+  const pctVast = pctDeclarabelGroep(vastNamen);
 
   return (
     <div>
@@ -1026,16 +1094,34 @@ function TeamTab() {
       {teamAvg!=null && (
         <div style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderRadius:12,padding:"16px 18px",marginBottom:"1.5rem",borderTop:"3px solid "+BRAND.blueDark,textAlign:"center",maxWidth:260}}>
           <div style={{fontSize:36,fontWeight:700,color:BRAND.blueDark,lineHeight:1}}>{teamAvg}%</div>
-          <div style={{fontSize:12,color:BRAND.textMuted,marginTop:4}}>Teamgemiddelde deze week</div>
+          <div style={{fontSize:12,color:BRAND.textMuted,marginTop:4}}>Teamgemiddelde totale productiviteit deze week</div>
         </div>
       )}
+
+      <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:"1.5rem"}}>
+        <div style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderRadius:12,padding:"14px 16px",borderTop:"3px solid "+BRAND.purple,minWidth:170,flex:"1 1 170px"}}>
+          <div style={{fontSize:24,fontWeight:700,color:pctColor(pctAlle)}}>{pctAlle==null?"—":pctAlle+"%"}</div>
+          <div style={{fontSize:11,color:BRAND.textMuted,marginTop:2}}>Productiviteit declarabel — alle collega's</div>
+        </div>
+        <div style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderRadius:12,padding:"14px 16px",borderTop:"3px solid "+BRAND.purple,minWidth:170,flex:"1 1 170px"}}>
+          <div style={{fontSize:24,fontWeight:700,color:pctColor(pctVariabel)}}>{pctVariabel==null?"—":pctVariabel+"%"}</div>
+          <div style={{fontSize:11,color:BRAND.textMuted,marginTop:2}}>Productiviteit declarabel — variabel salaris ({VARIABEL_SALARIS.join(", ")})</div>
+        </div>
+        <div style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderRadius:12,padding:"14px 16px",borderTop:"3px solid "+BRAND.purple,minWidth:170,flex:"1 1 170px"}}>
+          <div style={{fontSize:24,fontWeight:700,color:pctColor(pctVast)}}>{pctVast==null?"—":pctVast+"%"}</div>
+          <div style={{fontSize:11,color:BRAND.textMuted,marginTop:2}}>Productiviteit declarabel — vast salaris</div>
+        </div>
+      </div>
 
       <div style={{background:"#fff",border:"0.5px solid "+BRAND.border,borderRadius:12,padding:"16px 18px"}}>
         <div style={{fontSize:13,fontWeight:600,color:BRAND.text,marginBottom:14}}>Productiviteit per collega</div>
         {stats.length===0
           ? <div style={{fontSize:13,color:BRAND.textMuted}}>Nog geen data voor deze week.</div>
           : stats.map(s=>(
-              <ProdBar key={s.c} label={s.c} p={s.p} sub={s.prod+"u productief geweest van "+s.g+"u gewerkt"} />
+              <div key={s.c} style={{marginBottom:12}}>
+                <ProdBar label={s.c} p={s.p} sub={s.prod+"u productief geweest van "+s.g+"u gewerkt"} />
+                {s.pDecl!=null && <div style={{fontSize:11,color:BRAND.textMuted,marginTop:-6,marginLeft:2}}>Productiviteit declarabel: <b style={{color:pctColor(s.pDecl)}}>{s.pDecl}%</b> ({s.gedraaid}u gedraaid van {s.declarabel}u declarabel)</div>}
+              </div>
             ))
         }
       </div>
