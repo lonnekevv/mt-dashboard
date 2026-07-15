@@ -239,6 +239,7 @@ const CODE_LEGEND = {};
   const patient = [
     "010001","010002","010003","010006","010011","010012","010014","010015","010016","010017","010018", // Exclufit
     "1000", // reguliere zitting
+    "10007","10008","10009", // fysiofit-codes; alleen binnen vast fyziofit-venster telt dit als "fyziofit" (zie hieronder)
     "1001", // uitbehandeling
     "1064", // intake coulance
     "120","121","123","124", // echo/shockwave/strippenkaart/agraves
@@ -256,15 +257,28 @@ const CODE_LEGEND = {};
     "996", // sportspreekuur
   ];
   const fyziotraining = ["1314","1316"]; // groepszitting Fyziotraining
-  const fyziofit = ["10007","10008","10009"]; // FysioFit-uren
   const nietProductief = ["1960","1961","1962","998"];
   patient.forEach(c=>{ CODE_LEGEND[c]="patient"; });
   fyziotraining.forEach(c=>{ CODE_LEGEND[c]="fyziotraining"; });
-  fyziofit.forEach(c=>{ CODE_LEGEND[c]="fyziofit"; });
   nietProductief.forEach(c=>{ CODE_LEGEND[c]="niet_productief"; });
   CODE_LEGEND["VERG"]="vergadering";
   CODE_LEGEND["NOT"]="notitie";
 })();
+// Vaste FysioFit-tijdvakken: 10007/10008/10009 tellen ALLEEN als "fyziofit" (in plaats van gewone
+// patiëntcontact) als het tijdstip binnen zo'n vast venster valt — anders is het gewoon een individuele
+// patiënt buiten de FysioFit-groep om, en telt het als normale declarabele patiëntcontact.
+const FYZIOFIT_CODES = ["10007","10008","10009"];
+const FYZIOFIT_VENSTERS = {
+  maandag:   [["13:00","13:50"],["16:10","17:25"]],
+  dinsdag:   [["13:00","13:50"],["16:10","17:25"]],
+  woensdag:  [["13:00","13:50"],["16:10","17:25"]],
+  donderdag: [["13:00","13:50"],["16:10","17:25"]],
+  vrijdag:   [["13:00","13:50"],["16:10","17:00"]],
+};
+function isBinnenFyziofitVenster(dagNaam, s, e) {
+  const vensters = FYZIOFIT_VENSTERS[dagNaam] || [];
+  return vensters.some(([vs,ve]) => overlapUren(s,e,tijdNaarUren(vs),tijdNaarUren(ve)) > 0);
+}
 function zoekCategorie(code) {
   if (/^950/.test(code)) return "patient"; // alle 950xxx-codes zijn ZorgTopics → patiëntcontact
   return CODE_LEGEND[code] || null;
@@ -347,11 +361,14 @@ async function parseBalielijstFile(file, dagenRooster, mtRooster) {
     const duur = overlapUren(s,e,roosterStart,roosterEind); // knip af op het roostervenster; buiten het venster telt niet mee
     if (duur<=0) continue;
 
-    const cat = zoekCategorie(code);
+    let cat = zoekCategorie(code);
     if (!cat) {
       onbekend[code] = onbekend[code] || {label, uren:0};
       onbekend[code].uren = Math.round((onbekend[code].uren+duur)*100)/100;
       continue;
+    }
+    if (FYZIOFIT_CODES.includes(code)) {
+      cat = isBinnenFyziofitVenster(dagNaam, s, e) ? "fyziofit" : "patient";
     }
     const clipStart = Math.max(s,roosterStart), clipEind = Math.min(e,roosterEind);
     let pauzeOverlapDeze = 0;
