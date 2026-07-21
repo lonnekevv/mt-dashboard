@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
 :root{
   --bg:#F7F6F3;--surface:#FFF;--surface2:#F0EEE9;
@@ -192,6 +193,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);fon
     <button class="mtab" onclick="switchMainTab('beheer')">📁 Data beheer</button>
   </div>
 
+  <div style="display:flex;justify-content:flex-end;margin:-8px 0 16px">
+    <button id="btn-zt-pdf" onclick="downloadZorgTopicsPDF()" style="padding:7px 16px;background:#1A6EBF;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:500;cursor:pointer;font-family:'DM Sans',sans-serif">📄 PDF opslaan (Overzicht + MT-analyse)</button>
+  </div>
+
   <div class="tab-pane active" id="tab-data">
     <div class="header">
       <div class="header-top">
@@ -243,6 +248,9 @@ const SB_KEY='sb_publishable_EiIt1zJuqgjj-2FJ4mXTlg__kmUrPu5';
 const SB_HDR={'Content-Type':'application/json','apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY};
 const MV_TABLE='zorgtopics_mv';
 const DATA_TABLE='zorgtopics_data';
+
+// ── Drive-upload endpoint (ZorgTopics Rapport Ontvanger, Apps Script Web App) ──
+const DRIVE_UPLOAD_URL='https://script.google.com/macros/s/AKfycby5RIqir3mKVu3D_j51imA5KBaANCPCOPO325hd2uNmoVDQTfzt0aodN46OopEBwNLosw/exec';
 
 function debounce(fn,ms){let t;return(...args)=>{clearTimeout(t);t=setTimeout(()=>fn(...args),ms);};}
 
@@ -576,7 +584,7 @@ Chart.register(targetPlugin());
 
 // PATCH 3: y-axis max 102 so top dots aren't clipped
 function chartOpts(){
-  return{responsive:true,maintainAspectRatio:false,
+  return{responsive:true,maintainAspectRatio:false,animation:false,
     layout:{padding:{top:12}},plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.dataset.label+': '+c.parsed.y+'%'}},tl:{}},
     scales:{y:{min:0,max:108,ticks:{callback:v=>v<=100?v+'%':'',font:{size:10},color:'#9E9B94'},grid:{color:'rgba(0,0,0,.05)'},border:{display:false}},
       x:{ticks:{font:{size:10},color:'#9E9B94',autoSkip:false},grid:{display:false},border:{display:false}}}};
@@ -613,7 +621,7 @@ function renderMultiYearChart(){
   const pfDS=mkDS(r=>[r.pf,r.csi]);
   const pfcDS=mkDS((r,yr,m)=>{const mv=getMV(yr,m,r.topic);return mv&&mv>0?[r.pf,mv]:[0,0];});
   const hasPFCorr=pfcDS.some(d=>d.data.some(v=>v!=null));
-  const co={responsive:true,maintainAspectRatio:false,layout:{padding:{top:12}},plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.dataset.label+': '+c.parsed.y+'%'}},tl:{}},scales:{y:{min:0,max:108,ticks:{callback:v=>v<=100?v+'%':'',font:{size:10},color:'#9E9B94'},grid:{color:'rgba(0,0,0,.05)'},border:{display:false}},x:{ticks:{font:{size:11,weight:'600'},color:'#9E9B94'},grid:{display:false},border:{display:false}}}};
+  const co={responsive:true,maintainAspectRatio:false,animation:false,layout:{padding:{top:12}},plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.dataset.label+': '+c.parsed.y+'%'}},tl:{}},scales:{y:{min:0,max:108,ticks:{callback:v=>v<=100?v+'%':'',font:{size:10},color:'#9E9B94'},grid:{color:'rgba(0,0,0,.05)'},border:{display:false}},x:{ticks:{font:{size:11,weight:'600'},color:'#9E9B94'},grid:{display:false},border:{display:false}}}};
   const tl=legH();
   wrap.innerHTML=`
     <div class="chart-full" style="margin-bottom:14px"><div class="chart-card"><div class="chart-title">Zorgplan% per jaar</div><div class="chart-legend">${tl}</div><div class="chart-wrap-lg"><canvas id="cmulti-zp"></canvas></div></div></div>
@@ -986,6 +994,139 @@ function renderMT(){
       </div>
       <div style="margin-top:8px;font-size:11px;color:var(--text3);padding:8px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--rsm)">Weergave is feitelijk, zonder waardeoordeel · ${p||tPrev?`Δ vs ${p?prevYearLabel:prevPeriodLabel}`:''}</div>
     </div>`;
+}
+
+// ── PDF GENERATIE (VISUEEL) + DRIVE UPLOAD ───────────────────────────────
+function uploadNaarDrive(doc,bestandsnaam){
+  try{
+    const base64=doc.output('datauristring').split(',')[1];
+    fetch(DRIVE_UPLOAD_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({bestandsnaam,pdfBase64:base64})}).catch(()=>{});
+  }catch(e){}
+}
+
+async function ensureHtml2Canvas(){
+  if(window.html2canvas)return;
+  await new Promise((resolve,reject)=>{
+    const s=document.createElement('script');
+    s.src='https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+    s.onload=resolve;s.onerror=reject;document.head.appendChild(s);
+  });
+}
+
+async function captureElement(el){
+  if(!el)return null;
+  return await html2canvas(el,{scale:2,backgroundColor:'#F7F6F3',useCORS:true});
+}
+
+async function downloadZorgTopicsPDF(){
+  const btn=document.getElementById('btn-zt-pdf');
+  const origTxt=btn?btn.textContent:'';
+  if(btn){btn.disabled=true;btn.textContent='PDF genereren...';}
+  const originalMainTab=mainTab,originalCurMTKey=curMTKey;
+  try{
+    await ensureHtml2Canvas();
+    const key=curKey;
+    const periodLabel=getLabel(key)+' 2026';
+
+    // ── Screenshots maken: Overzicht Data ──
+    switchMainTab('data');
+    await new Promise(r=>setTimeout(r,250));
+    const shots=[];
+    async function voegToe(id,label){
+      const el=document.getElementById(id);
+      if(!el||el.offsetHeight===0)return;
+      const canvas=await captureElement(el);
+      shots.push({label,canvas});
+    }
+    await voegToe('kpi-row',"KPI's - "+periodLabel);
+    await voegToe('topic-grid','Per ZorgTopic - '+periodLabel);
+    await voegToe('risk-wrap','Risicoverdeling productfinanciering');
+    await voegToe('chart-zp-wrap','Trend inclusiepercentage zorgplan');
+    await voegToe('chart-pf-wrap','Trend inclusiepercentage productfinanciering');
+    await voegToe('chart-multiyear-wrap','Meerjarentrend');
+
+    // ── Screenshots maken: MT-analyse (zelfde periode als Overzicht Data) ──
+    curMTKey=key;
+    switchMainTab('mt');
+    await new Promise(r=>setTimeout(r,250));
+    const mtSections=document.querySelectorAll('#mt-content > .theme-section');
+    for(const sec of mtSections){
+      if(sec.offsetHeight===0)continue;
+      const canvas=await captureElement(sec);
+      shots.push({label:null,canvas});
+    }
+
+    // ── Terug naar de weergave die de gebruiker had openstaan ──
+    curMTKey=originalCurMTKey;
+    switchMainTab(originalMainTab);
+
+    // ── PDF opbouwen ──
+    const{jsPDF}=window.jspdf;
+    const doc=new jsPDF({unit:'mm',format:'a4'});
+    const marginX=18,pageWidth=210,pageHeight=297,contentWidth=pageWidth-marginX*2,marginBottom=22,marginTop=20;
+    let y=marginTop;
+
+    doc.setFont('helvetica','bold');doc.setFontSize(17);
+    doc.setTextColor(26,25,23);
+    doc.text('Fyzio',marginX,y);
+    const fb=doc.getTextWidth('Fyzio');
+    doc.setTextColor(26,110,191);
+    doc.text('Totaal',marginX+fb,y);
+    doc.setFont('helvetica','normal');doc.setFontSize(9);
+    doc.setTextColor(107,114,128);
+    doc.text('ZorgTopics - '+periodLabel,pageWidth-marginX,y,{align:'right'});
+    y+=4;
+    doc.setDrawColor(26,25,23);doc.setLineWidth(0.8);
+    doc.line(marginX,y,pageWidth-marginX,y);
+    y+=9;
+    doc.setFont('helvetica','bold');doc.setFontSize(14);
+    doc.setTextColor(26,25,23);
+    doc.text('Inclusie-overzicht - '+periodLabel,marginX,y);
+    y+=9;
+
+    const volledigePagina=pageHeight-marginBottom-marginTop;
+    shots.forEach(shot=>{
+      const canvas=shot.canvas;if(!canvas)return;
+      const imgW=contentWidth;
+      const imgH=canvas.height*(imgW/canvas.width);
+      const labelHoogte=shot.label?6:0;
+      const totaalHoogte=labelHoogte+imgH;
+      const beschikbaar=pageHeight-marginBottom-y;
+      // Voorkom een knip halverwege een onderdeel: past het niet meer op de
+      // rest van deze pagina, maar wel op een volle pagina, begin dan een
+      // nieuwe pagina (liever lege ruimte onderaan dan een midden-in-de-kaart knip).
+      if(totaalHoogte>beschikbaar&&totaalHoogte<=volledigePagina){
+        doc.addPage();y=marginTop;
+      }
+      if(shot.label){
+        doc.setFont('helvetica','bold');doc.setFontSize(11);
+        doc.setTextColor(26,25,23);
+        doc.text(shot.label,marginX,y);
+        y+=6;
+      }
+      const imgData=canvas.toDataURL('image/png');
+      doc.addImage(imgData,'PNG',marginX,y,imgW,imgH);
+      y+=imgH+8;
+    });
+
+    const paginas=doc.internal.getNumberOfPages();
+    for(let pnum=1;pnum<=paginas;pnum++){
+      doc.setPage(pnum);
+      doc.setFont('helvetica','normal');doc.setFontSize(8);
+      doc.setTextColor(156,163,175);
+      doc.text('Fyzio Totaal   \u00b7   Nijverheidsstraat 7, Wierden   \u00b7   www.fyziototaal.nl',pageWidth/2,pageHeight-10,{align:'center'});
+    }
+
+    const bestandsnaam='ZorgTopics_'+String(key).replace(/\s+/g,'_')+'_'+periodLabel.replace(/[\s()–]+/g,'_')+'.pdf';
+    doc.save(bestandsnaam);
+    uploadNaarDrive(doc,bestandsnaam);
+  }catch(e){
+    alert('PDF genereren mislukt: '+e.message);
+    curMTKey=originalCurMTKey;
+    switchMainTab(originalMainTab);
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent=origTxt;}
+  }
 }
 
 // ── DATA / BEHEER ──────────────────────────────────────────────────────────
