@@ -1050,10 +1050,12 @@ async function downloadZorgTopicsPDF(){
     switchMainTab('mt');
     await new Promise(r=>setTimeout(r,250));
     const mtSections=document.querySelectorAll('#mt-content > .theme-section');
+    let eersteMtSectie=true;
     for(const sec of mtSections){
       if(sec.offsetHeight===0)continue;
       const canvas=await captureElement(sec);
-      shots.push({label:null,canvas});
+      shots.push({label:eersteMtSectie?'MT-analyse - '+periodLabel:null,canvas,groteKop:eersteMtSectie});
+      eersteMtSectie=false;
     }
 
     // ── Terug naar de weergave die de gebruiker had openstaan ──
@@ -1089,21 +1091,36 @@ async function downloadZorgTopicsPDF(){
       const canvas=shot.canvas;if(!canvas)return;
       const imgW=contentWidth;
       const imgH=canvas.height*(imgW/canvas.width);
-      const labelHoogte=shot.label?6:0;
-      const totaalHoogte=labelHoogte+imgH;
-      const beschikbaar=pageHeight-marginBottom-y;
-      // Voorkom een knip halverwege een onderdeel: past het niet meer op de
-      // rest van deze pagina, maar wel op een volle pagina, begin dan een
-      // nieuwe pagina (liever lege ruimte onderaan dan een midden-in-de-kaart knip).
-      if(totaalHoogte>beschikbaar&&totaalHoogte<=volledigePagina){
+
+      // Grote sectiekop (start van MT-analyse): altijd op een nieuwe pagina,
+      // met dezelfde stijl als de hoofdtitel bovenaan het rapport.
+      if(shot.groteKop){
         doc.addPage();y=marginTop;
-      }
-      if(shot.label){
+        doc.setFont('helvetica','bold');doc.setFontSize(15);
+        doc.setTextColor(26,25,23);
+        doc.text(shot.label,marginX,y);
+        y+=4;
+        doc.setDrawColor(26,110,191);doc.setLineWidth(0.8);
+        doc.line(marginX,y,pageWidth-marginX,y);
+        y+=10;
+      }else if(shot.label){
+        const labelHoogte=6;
+        const totaalHoogte=labelHoogte+imgH;
+        const beschikbaar=pageHeight-marginBottom-y;
+        if(totaalHoogte>beschikbaar&&totaalHoogte<=volledigePagina){
+          doc.addPage();y=marginTop;
+        }
         doc.setFont('helvetica','bold');doc.setFontSize(11);
         doc.setTextColor(26,25,23);
         doc.text(shot.label,marginX,y);
         y+=6;
+      }else{
+        const beschikbaar=pageHeight-marginBottom-y;
+        if(imgH>beschikbaar&&imgH<=volledigePagina){
+          doc.addPage();y=marginTop;
+        }
       }
+
       const imgData=canvas.toDataURL('image/png');
       doc.addImage(imgData,'PNG',marginX,y,imgW,imgH);
       y+=imgH+8;
